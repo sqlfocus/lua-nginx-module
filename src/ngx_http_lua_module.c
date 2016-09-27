@@ -603,6 +603,7 @@ ngx_http_module_t ngx_http_lua_module_ctx = {
 };
 
 
+/* nginx lua模块儿的声明结构 */
 ngx_module_t ngx_http_lua_module = {
     NGX_MODULE_V1,
     &ngx_http_lua_module_ctx,   /*  module context */

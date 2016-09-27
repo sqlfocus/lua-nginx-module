@@ -6,5 +6,28 @@
 
 nginx lua模块儿的说明文档已经汉化，参考[[https://github.com/iresty/nginx-lua-module-zh-wiki][github]].
 
+* 简介
+该模块通过标准Lua5.1解释器或LuaJIT 2.0/2.1，把Lua嵌入到Nginx里面，并
+利用Nginx子请求，把强大的Lua线程（Lua协程）混合到Nginx的事件模型中。
+  - 应通过Nginx API for Lua来处理请求上游服务，以保证lua代码非阻塞
+  - 通过子请求ngx.location.capture或ngx.location.capture_multi可与上游模块交互
+  - 但推荐lua-resty-*库，访问Nginx上游模块，因为更加灵活并且内存效率更高
+  - 单个Nginx worker中，标准Lua或LuaJIT的实例在所有请求中是共享使用的
+  - 每个请求上下文是通过轻量的Lua协程做到隔离的
+  - 是Nginx的HTTP子系统插件，所以只能与HTTP环境交互
+  - 应使用ngx_stream_lua模块与通用的TCP环境交互
+
+* 易混淆点
+  - 通过lua接口os.getenv()获取环境变量
+     : 前提需要在nginx.conf文件中，通过'env xxx'声明；如'env foo;' 
+  -
+
+* 名词解释
+  - lua state     :: lua虚拟机实例（lua vm instance），或lua环境
+
+* 参考
+  - lua.org
+  - [[https://github.com/sqlfocus/nginx][nginx github]]
+
 
 
