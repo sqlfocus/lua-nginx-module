@@ -1,3 +1,7 @@
+GPATH
+GRTAGS
+GSYMS
+GTAGS
 build/
 work/
 tags

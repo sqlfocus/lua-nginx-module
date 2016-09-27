@@ -1,0 +1,10 @@
+#+TITLE: nginx lua模块儿简介
+#+AUTHOR: sqlfocus
+
+本系列文档摘录nginx的lua模块儿，以期更深入了解lua语言；了解lua为c语言
+世界带来的便利，为自己设计可伸缩性（动态加载）架构开阔眼界！
+
+nginx lua模块儿的说明文档已经汉化，参考[[https://github.com/iresty/nginx-lua-module-zh-wiki][github]].
+
+
+
