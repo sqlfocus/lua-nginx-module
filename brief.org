@@ -323,6 +323,25 @@ ngx.location.capture的方法)处理。
   - lua state     :: lua虚拟机实例（lua vm instance），或lua环境
 
 * 示例
+** 单个请求不同阶段的数据共享
+通过ngx.ctx表，可在单个请求的不同阶段共享变量数据。
+
+ #+BEGIN_EXAMPLE
+ location /test {
+     rewrite_by_lua_block {
+         ngx.ctx.foo = 76
+     };
+
+     access_by_lua_block {
+         ngx.ctx.foo = ngx.ctx.foo + 3
+     };
+
+     content_by_lua_block {
+         ngx.say(ngx.ctx.foo)
+     };
+ }
+ #+END_EXAMPLE
+
 ** nginx worker进程内所有请求共享数据
 *方案1* ，将共享数据封装进lua模块儿，使用require方法加载模块儿
 
@@ -376,7 +395,7 @@ ngx.location.capture的方法)处理。
   - 使用类似memcached, redis, MySQL或PostgreSQL等数据共享机制
       : 参考[[https://github.com/openresty/lua-resty-redis]]
 
-** 子请
+** 子请求
   - ngx.redirect()        :: 重定向，发送302或301
   - ngx.exec()            :: 内部跳转，终止当前请求的处理，一般与return联合使用
   - ngx.location.capture()         :: 内部子请求，同步非阻塞 
