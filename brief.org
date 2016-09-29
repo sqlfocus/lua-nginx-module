@@ -9,12 +9,12 @@ nginx lua模块儿的说明文档已经汉化，参考[[https://github.com/irest
 * 简介
 该模块通过标准Lua5.1解释器或LuaJIT 2.0/2.1，把Lua嵌入到Nginx里面，并
 利用Nginx子请求，把强大的Lua线程（Lua协程）混合到Nginx的事件模型中。
-  - 应通过Nginx API for Lua来处理请求上游服务，以保证lua代码非阻塞
-  - 通过子请求ngx.location.capture或ngx.location.capture_multi可与上游模块交互
-  - 但推荐lua-resty-*库，访问Nginx上游模块，因为更加灵活并且内存效率更高
-  - 单个Nginx worker中，标准Lua或LuaJIT的实例在所有请求中是共享使用的
-  - 每个请求上下文是通过轻量的Lua协程做到隔离的
-  - 是Nginx的HTTP子系统插件，所以只能与HTTP环境交互
+  - 异步非阻塞架构，非常适合构建高性能服务器
+  - 处理请求时，应使用 ~Nginx API for Lua~ ，以保证lua代码非阻塞特性
+  - 在 ~lua_code_cache on~ 时，每个nginx worker对应一个Lua或LuaJIT实例
+  - worker中，每个请求上下文通过轻量的Lua协程隔离
+  - 本模块儿是Nginx的HTTP子系统插件，只能与HTTP环境交互
+  - 推荐阅读并使用相关的lua-resty-*库，随时跟近openresty进展
   - 应使用ngx_stream_lua模块与通用的TCP环境交互
 
 * 常用指令
@@ -35,7 +35,7 @@ nginx lua模块儿的说明文档已经汉化，参考[[https://github.com/irest
 
 *用途* ，黑白名单，认证等
 
-*注意* ，总是在标准ngx_http_access_module的后面
+*注意* ，总是在标准 ~ngx_http_access_module~ 的后面
 
 ** ~body_filter_by_lua_block~
  #+BEGIN_EXAMPLE
@@ -66,7 +66,7 @@ nginx lua模块儿的说明文档已经汉化，参考[[https://github.com/irest
 并作为一个新的协程，在一个独立的全局环境中执行（就像一个沙盒）。
 
 *注意* ，不要将本指令和其他内容处理程序指令放到同一个location中； 比如，本
-指令和proxy_pass指令就不能在同一个location中使用。
+指令和 ~proxy_pass~ 指令就不能在同一个location中使用。
 
 ** ~header_filter_by_lua_block~
  #+BEGIN_EXAMPLE
@@ -80,9 +80,9 @@ nginx lua模块儿的说明文档已经汉化，参考[[https://github.com/irest
 *用途* ，应答消息头部的过滤
 
 *禁用* ，<<disable API>>
-         输出类函数（ngx.say和ngx.send_headers）
+         输出类函数（ngx.say和 ~ngx.send_headers~ ）
          控制类函数（ngx.redirect和ngx.exec）
-         子请求相关函数（ngx.location.capture和ngx.location.capture_multi）
+         子请求相关函数（ngx.location.capture和 ~ngx.location.capture_multi~ ）
          cosocket类函数（ngx.socket.tcp和ngx.req.socket）
 
 ** ~init_by_lua_block~
@@ -93,13 +93,13 @@ nginx lua模块儿的说明文档已经汉化，参考[[https://github.com/irest
  老版本: init_by_lua <lua-script-str>
  文件版: init_by_lua_file <path-to-lua-script-file>
  #+END_EXAMPLE
-当Nginx master进程（如果有）加载配置文件时，在全局的Lua虚拟机上运行；当
-Nginx收到HUP信号并开始重新加载配置文件，将重新创建Lua虚拟机并再次运行此
-代码段。
+当 ~Nginx master~ 进程（如果有）加载配置文件时，在全局的Lua虚拟机上运行；当
+Nginx收到HUP信号并开始重新加载配置文件，将重新创建Lua虚拟机并再次运行此代码
+段。
 
-*用途* ，用于注册Lua全局变量、预加载Lua模块、初始化lua_shared_dict共享内存
-等；但是lua_shared_dict在HUP信号重新加载时不清空，所以需要设置一个标识来检
-测是否需要重新加载共享内存
+*用途* ，用于注册Lua全局变量、预加载Lua模块、初始化 ~lua_shared_dict~ 共享内
+存等；但是 ~lua_shared_dict~ 在HUP信号重新加载时不清空，所以需要设置一个标识
+来检测是否需要重新加载共享内存
 
 *时机* ，在nginx的fork之前调用执行，因此加载的数据和代码将被工作进程通过
 copy-on-write方式继承
@@ -117,7 +117,7 @@ copy-on-write方式继承
  #+END_EXAMPLE
 
 *时机* ，开启master进程模式，Nginx工作进程启动时执行指定的Lua代码；关闭master模式，
-将在 init_by_lua* 后直接运行。
+将在 ~init_by_lua*~ 后直接运行。
 
 *用途* ，创建单进程的反复执行定时器（通过ngx.timer.at Lua API创建），可以
 是后端服务健康检查，也可以是其他定时的日常工作。
@@ -128,26 +128,26 @@ copy-on-write方式继承
  默认: lua_code_cache on
  环境: http, server, location, location if
  #+END_EXAMPLE
-打开或者关闭 ~*_by_lua_file~ 指令（类似set_by_lua_file和content_by_lua_file）
+打开或者关闭 ~*_by_lua_file~ 指令（类似 ~set_by_lua_file~ 和 ~content_by_lua_file~ ）
 中指定的Lua代码，以及Lua模块的Lua代码缓存。
 
-当缓存关闭时，每个ngx_lua处理的请求都将会运行在一个单独的lua虚拟机实例中；所
-以在set_by_lua_file, content_by_lua_file, access_by_lua_file中引用的Lua文件不
-会被缓存，并且所有使用的Lua模块都会从头开始加载。
+当缓存关闭时，每个 ~ngx_lua~ 处理的请求都将会运行在一个单独的lua虚拟机实例中；所
+以在 ~set_by_lua_file~, ~content_by_lua_file~, ~access_by_lua_file~ 中引用的Lua
+文件不会被缓存，并且所有使用的Lua模块都会从头开始加载。
 
 有了这个选项，开发者很容易通过编辑文件并重新请求的方法进行测试。
 
-*注意* ，编辑nginx.conf中内嵌的Lua代码时，比如set_by_lua/content_by_lua/
-access_by_lua/rewrite_by_lua指令，缓存不会被更新；因为只有Nginx的配置文件解
-释器才能正确解析nginx.conf，所以重新加载配置文件的唯一办法是发送HUP信号或者
+*注意* ，编辑nginx.conf中内嵌的Lua代码时，比如 ~set_by_lua/content_by_lua/~
+~access_by_lua/rewrite_by_lua~ 指令，缓存不会被更新；因为只有Nginx的配置文件
+解释器才能正确解析nginx.conf，所以重新加载配置文件的唯一办法是发送HUP信号或者
 重启Nginx。
   #+BEGIN_EXAMPLE
   kill -HUP pid
   nginx -s reload
   #+END_EXAMPLE
 
-*注意* ，即使代码缓存打开了，在 *_by_lua_file中使用dofile或loadfile函数时内
-容不会被缓存（除非你自己缓存结果）。通常你可以在init_by_lua或init_by_lua_file
+*注意* ，即使代码缓存打开了，在 ~*_by_lua_file~ 中使用dofile或loadfile函数时内
+容不会被缓存（除非你自己缓存结果）。通常你可以在 ~init_by_lua~ 或 ~init_by_lua_file~
 指令中加载所有这些文件；或者让这些Lua文件变成真正的Lua模块，通过require加载。
 
 *注意* ，不推荐在生产环境中关闭lua代码缓存，请确保它只在开发环境中使用，他对
@@ -205,7 +205,7 @@ access_by_lua/rewrite_by_lua指令，缓存不会被更新；因为只有Nginx�
 *时机* ，重写阶段的处理程序，为每个请求执行指定的Lua代码；可以调用全部API，
 并作为一个新的协程，在一个独立的全局环境中执行（就像一个沙盒）。
 
-*注意* ，处理过程总是在标准ngx_http_rewrite_module的后面
+*注意* ，处理过程总是在标准 ~ngx_http_rewrite_module~ 的后面
 
 ** ~set_by_lua_block~
  #+BEGIN_EXAMPLE
@@ -222,9 +222,9 @@ access_by_lua/rewrite_by_lua指令，缓存不会被更新；因为只有Nginx�
 *设计* ，被设计为执行短小、快速的代码块，因为代码执行时Nginx的事件循环是被阻
 塞的；因此应避免耗时的代码处理。
 
-*原理* ，是通过挂载自定义命令到标准ngx_http_rewrite_module模块列表来实现；
-因为模块ngx_http_rewrite_module不支持非阻塞I/O，所以在本指令中，无法yield当
-前Lua的“轻线程”。
+*原理* ，是通过挂载自定义命令到标准 ~ngx_http_rewrite_module~ 模块列表来实现；
+因为模块 ~ngx_http_rewrite_module~ 不支持非阻塞I/O，所以在本指令中，无法yield
+当前Lua的“轻线程”。
 
 *注意* ，本指令一次只能写回一个值到一个Nginx变量；可以使用ngx.var.VARIABLE接
 口绕过这个限制。
@@ -244,9 +244,9 @@ access_by_lua/rewrite_by_lua指令，缓存不会被更新；因为只有Nginx�
 lua-resty-core库的ngx.balancer完成。
 
 * Nginx API for lua
-nginx.conf文件中各种 ~*_by_lua_block~ 和 ~*_by_lua_file~ 配置指令的作用是提
-供Lua API的接口环境。而nginx API for Lua，只能用在上述配置指令的环境中，通
-过用户Lua代码调用。
+nginx.conf文件通过各种 ~*_by_lua_block~ 和 ~*_by_lua_file~ 配置指令提供Lua API
+的接口环境；而nginx API for Lua，只能用在上述配置指令的环境中，通过用户Lua代码
+调用。
 
 Lua中使用的API以两个标准模块的形式封装 *ngx* 和 *ndk*；这两个模块在ngx_lua默
 认的全局作用域中，在ngx_lua指令中总是可用。
@@ -262,8 +262,8 @@ Lua中使用的API以两个标准模块的形式封装 *ngx* 和 *ndk*；这两�
   #+END_EXAMPLE
 
 用户代码中的网络I/O操作应该使用这些Nginx Lua API实现，否则Nginx的事件循环可
-能被阻塞，从而严重影响性能。相对小数据量的磁盘操作可以通过标准的Lua io库来
-实现，但大规模的文件读写如果可能应该避免，因为可能会严重阻塞Nginx进程。为获
+能被阻塞，从而严重影响性能；相对小数据量的磁盘操作可以通过标准的Lua io库来
+实现，但大规模的文件读写如果可能应该避免，因为可能会严重阻塞Nginx进程；为获
 得最好性能，强烈建议将所有网络和磁盘I/O操作发送到Nginx的子请求中(通过类似 
 ngx.location.capture的方法)处理。
 
@@ -272,28 +272,28 @@ ngx.location.capture的方法)处理。
   - ngx.encode_args                :: 根据URI编码规则，将Lua表编码成一个查询参数字符串
   - ngx.encode_base64              :: 通过base64对str字符串编码
   - ngx.eof                        :: 明确指定响应输出流的末尾，用于执行后台任务
-  - ngx.escape_uri                 :: URI编码
+  - ~ngx.escape_uri~               :: URI编码
   - ngx.exec                       :: 执行一个内部跳转
   - ngx.exit                       :: 请求退出方式由状态码决定
   - ngx.flush                      :: 向客户端刷新响应输出
   - ngx.header.HEADER              :: 修改、添加、或清除当前请求待发送的HEADER响应头信息
-  - ngx.get_phase                  :: 检索当前正在执行的阶段名称
+  - ~ngx.get_phase~                :: 检索当前正在执行的阶段名称
   - ngx.location.capture           :: 向uri发起一个同步非阻塞Nginx子请求
-  - ngx.location.capture_multi     :: 多个并发子请求
+  - ~ngx.location.capture_multi~   :: 多个并发子请求
   - ngx.log                        :: 参数拼接起来，按照设定的日志级别记入error.log
   - ngx.md5                        :: 通过MD5计算str字符串返回十六进制的数据
   - ngx.print                      :: 输入参数合并发送给HTTP客户端(作为HTTP响应体)
   - ngx.re.match                   :: 使用Perl兼容正则表达式匹配字符串
   - ngx.redirect                   :: 发出一个HTTP 301或302重定向到uri
-  - ngx.req.read_body              :: 同步读取客户端请求体，不阻塞Nginx事件循环
-  - ngx.req.discard_body           :: 明确丢弃请求体，异步函数
-  - ngx.req.http_version           :: 当前请求的HTTP版本号
-  - ngx.req.get_headers            :: 获取请求头信息，lua表
-  - ngx.req.raw_header             :: 获取原始请求头
-  - ngx.req.set_uri                :: 重写当前请求的URI
-  - ngx.req.set_uri_args           :: 重写当前请求的URI请求参数
+  - ~ngx.req.read_body~            :: 同步读取客户端请求体，不阻塞Nginx事件循环
+  - ~ngx.req.discard_body~         :: 明确丢弃请求体，异步函数
+  - ~ngx.req.http_version~         :: 当前请求的HTTP版本号
+  - ~ngx.req.get_headers~          :: 获取请求头信息，lua表
+  - ~ngx.req.raw_header~           :: 获取原始请求头
+  - ~ngx.req.set_uri~              :: 重写当前请求的URI
+  - ~ngx.req.set_uri_args~         :: 重写当前请求的URI请求参数
   - ngx.req.socket                 :: 返回一个包含下游连接的只读cosocket对象
-  - ngx.resp.get_headers           :: 获取当前请求的所有响应头信息，lua表
+  - ~ngx.resp.get_headers~         :: 获取当前请求的所有响应头信息，lua表
   - ngx.say                        :: 与ngx.print相同，同时末尾添加一个回车符
   - ngx.shared.DICT                :: 获取基于共享内存名为DICT的Lua字典对象
   - ngx.sleep                      :: 无阻塞地休眠特定秒
@@ -307,13 +307,6 @@ ngx.location.capture的方法)处理。
 * 易混淆出错点
   - 通过lua接口os.getenv()获取环境变量
      : 前提需要在nginx.conf文件中，通过'env xxx'声明；如'env foo;' 
-  - 在单worker进程内所有请求间共享数据
-     : 将共享数据封装进同一个lua模块儿
-     : 使用lua语言内置的require方法加载模块儿
-     :
-     : 原理，进程加载模块儿的操作仅被执行一次，所有的协程都会共享一份拷贝
-     : 备注，此处的数据不能在worker进程间共享
-     : 备注，lua全局变量被封装在请求对应的协程，不会被保留，不能用于请求间共享
   - lua代码中全部使用局部变量
      : 如，local xxx = require('xxx')  替换  require('xxx')
      : 
@@ -330,7 +323,15 @@ ngx.location.capture的方法)处理。
   - lua state     :: lua虚拟机实例（lua vm instance），或lua环境
 
 * 示例
-** nginx worker进程所有请求共享数据
+** nginx worker进程内所有请求共享数据
+*方案1* ，将共享数据封装进lua模块儿，使用require方法加载模块儿
+
+*原理* ，进程加载模块儿的操作仅被执行一次，所有的协程都会共享一份拷贝
+
+*备注* ，lua全局变量被封装在请求对应的协程，不会被保留，不能用于请求间共享
+
+*方案2* ，通过官方模块儿[[https://github.com/openresty/lua-resty-lrucache][lua-resty-lrucache]] 提供的resty.lrucache接口
+
 一般情况下，仅推荐使用这种方式共享 *只读* 数据；当计算过程中 *没有* *非阻塞*
 性I/O操作时(包括ngx.sleep)，你也可以在nginx worker进程内所有并发请求中共享可
 改变的数据，只要你不把控制权交还给nginx事件循环以及ngx_lua的轻量级线程调度器
@@ -359,22 +360,33 @@ ngx.location.capture的方法)处理。
   #+BEGIN_EXAMPLE
   #nginx.conf
   location /lua {
-      content_by_lua '
-          local mydata = requre 'mydata'
+      content_by_lua_block {
+          local mydata = requre('mydata')
           ngx.say(mydata.get_age("dog"))
-      ';
+      };
   }
   #+END_EXAMPLE
 
 ** nginx worker进程间共享数据
-  - 使用本模块提供的ngx.shared.DICT API
+  - 通过init_by_lua_block系列指令引入的全局变量
+      : 此上下文中的Lua代码是在Nginx fork工作进程之前执行
+      : 加载的数据和代码将被友好Copy-on-write特性提供给其他所有工作进程
+      : 因此，适合作全局只读共享，不过此方式读取效率稍低
+  - 使用ngx.shared.DICT API
   - 使用类似memcached, redis, MySQL或PostgreSQL等数据共享机制
+      : 参考[[https://github.com/openresty/lua-resty-redis]]
 
+** 子请
+  - ngx.redirect()        :: 重定向，发送302或301
+  - ngx.exec()            :: 内部跳转，终止当前请求的处理，一般与return联合使用
+  - ngx.location.capture()         :: 内部子请求，同步非阻塞 
+  - ngx.location.capture_multi()   :: 多个并发的内部子请求
 * 参考
   - lua.org
-  - [[https://github.com/sqlfocus/nginx][nginx github]]
+  - [[https://github.com/sqlfocus/nginx][nginx注解]]
   - ~/t目录的测试用例
   - 说明文档~/README.markdown
+  - [[http://www.stuq.org/my/courses/study/1015][360培训视频]]
 
 
 
