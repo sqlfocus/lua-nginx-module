@@ -667,6 +667,7 @@ ngx_http_lua_content_by_lua_block(ngx_conf_t *cf, ngx_command_t *cmd,
 }
 
 
+/* content_by_lua系列指令的配置解析入口函数 */
 char *
 ngx_http_lua_content_by_lua(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
@@ -765,7 +766,7 @@ ngx_http_lua_content_by_lua(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         return NGX_CONF_ERROR;
     }
 
-    clcf->handler = ngx_http_lua_content_handler;
+    clcf->handler = ngx_http_lua_content_handler;   /*  */
 
     return NGX_CONF_OK;
 }

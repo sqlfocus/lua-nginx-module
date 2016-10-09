@@ -276,13 +276,16 @@ static ngx_command_t ngx_http_lua_cmds[] = {
       0,
       (void *) ngx_http_lua_content_handler_inline },
 
-    /* content_by_lua_block { <inline script> } */
+    /* 重点关注此语句，以此了解lua nginx API的实现流程；
+       上下文：location或location if
+       content_by_lua_block { <inline script> } */
     { ngx_string("content_by_lua_block"),
       NGX_HTTP_LOC_CONF|NGX_HTTP_LIF_CONF|NGX_CONF_BLOCK|NGX_CONF_NOARGS,
-      ngx_http_lua_content_by_lua_block,
+      ngx_http_lua_content_by_lua_block,              /* lua代码配置解析 */
       NGX_HTTP_LOC_CONF_OFFSET,
       0,
-      (void *) ngx_http_lua_content_handler_inline },
+      (void *) ngx_http_lua_content_handler_inline    /* 处理句柄 */
+    },
 
     /* log_by_lua <inline script> */
     { ngx_string("log_by_lua"),
@@ -590,7 +593,7 @@ ngx_http_module_t ngx_http_lua_module_ctx = {
 #else
     NULL,                             /*  preconfiguration */
 #endif
-    ngx_http_lua_init,                /*  postconfiguration */
+    ngx_http_lua_init,                /*  配置解析完毕后，检测；postconfiguration */
 
     ngx_http_lua_create_main_conf,    /*  create main configuration */
     ngx_http_lua_init_main_conf,      /*  init main configuration */
@@ -608,7 +611,7 @@ ngx_module_t ngx_http_lua_module = {
     NGX_MODULE_V1,
     &ngx_http_lua_module_ctx,   /*  module context */
     ngx_http_lua_cmds,          /*  module directives */
-    NGX_HTTP_MODULE,            /*  module type */
+    NGX_HTTP_MODULE,            /*  模块儿类型 */
     NULL,                       /*  init master */
     NULL,                       /*  init module */
     ngx_http_lua_init_worker,   /*  init process */

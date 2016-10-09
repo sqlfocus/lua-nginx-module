@@ -146,12 +146,12 @@ typedef struct {
     lua_CFunction        loader;
 } ngx_http_lua_preload_hook_t;
 
-
+/* lua nginx模块儿主环境 */
 struct ngx_http_lua_main_conf_s {
-    lua_State           *lua;
+    lua_State           *lua;        /* lua引擎栈 */
 
-    ngx_str_t            lua_path;
-    ngx_str_t            lua_cpath;
+    ngx_str_t            lua_path;   /* 对应Lua_package_path，lua脚本搜索路径 */
+    ngx_str_t            lua_cpath;  /* 对应Lua_package_cpath，lua c模块儿搜索路径 */
 
     ngx_cycle_t         *cycle;
     ngx_pool_t          *pool;
@@ -228,7 +228,7 @@ union ngx_http_lua_srv_conf_u {
     } balancer;
 };
 
-
+/* lua nginx模块儿location环境 */
 typedef struct {
 #if (NGX_HTTP_SSL)
     ngx_ssl_t              *ssl;  /* shared by SSL cosockets */
@@ -239,17 +239,15 @@ typedef struct {
     ngx_str_t               ssl_crl;
 #endif
 
-    ngx_flag_t              force_read_body; /* whether force request body to
-                                                be read */
-
-    ngx_flag_t              enable_code_cache; /* whether to enable
-                                                  code cache */
-
+    ngx_flag_t              force_read_body;   /* 对应配置lua_need_request_body，
+                                                是否强制读取请求体 */
+    ngx_flag_t              enable_code_cache; /* 对应配置lua_code_cache，是否
+                                                  使能code cache */
     ngx_flag_t              http10_buffering;
 
     ngx_http_handler_pt     rewrite_handler;
     ngx_http_handler_pt     access_handler;
-    ngx_http_handler_pt     content_handler;
+    ngx_http_handler_pt     content_handler;   /* 处理句柄，对应ngx_http_lua_content_handler_inline() */
     ngx_http_handler_pt     log_handler;
     ngx_http_handler_pt     header_filter_handler;
 
@@ -270,10 +268,8 @@ typedef struct {
     u_char                  *access_src_key; /* cached key for access_src */
 
     u_char                  *content_chunkname;
-    ngx_http_complex_value_t content_src;    /*  content_by_lua
-                                                inline script/script
-                                                file path */
-
+    ngx_http_complex_value_t content_src;    /* 由content_by_lua系列配置指定
+                                                的lua代码串，或lua脚本路径 */
     u_char                 *content_src_key; /* cached key for content_src */
 
 
@@ -306,6 +302,7 @@ typedef struct {
 
     ngx_flag_t                       transform_underscores_in_resp_headers;
     ngx_flag_t                       log_socket_errors;
+    /* 对应配置lua_check_client_abort，检查client是否关闭连接 */
     ngx_flag_t                       check_client_abort;
     ngx_flag_t                       use_default_type;
 } ngx_http_lua_loc_conf_t;
