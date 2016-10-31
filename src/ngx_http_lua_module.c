@@ -58,7 +58,7 @@ static ngx_int_t ngx_http_lua_pre_config(ngx_conf_t *cf);
 static ngx_conf_post_t  ngx_http_lua_lowat_post =
     { ngx_http_lua_lowat_check };
 
-
+/* 对应当前运行中的周期(cycle)，代表当前运行的配置 */
 static volatile ngx_cycle_t  *ngx_http_lua_prev_cycle = NULL;
 
 
@@ -589,12 +589,14 @@ ngx_http_module_t ngx_http_lua_module_ctx = {
 #if (NGX_HTTP_LUA_HAVE_MMAP_SBRK)                                            \
     && (NGX_LINUX)                                                           \
     && !(NGX_HTTP_LUA_HAVE_CONSTRUCTOR)
-    ngx_http_lua_pre_config,          /*  preconfiguration */
+    ngx_http_lua_pre_config,          /*  配置解析前调用，luajit优化 */
 #else
-    NULL,                             /*  preconfiguration */
+    NULL,
 #endif
-    ngx_http_lua_init,                /*  配置解析完毕后，检测；postconfiguration */
+    ngx_http_lua_init,                /*  配置解析完毕后调用，创建Lua虚拟机；
+                                          初始化全局变量，如ngx、ndk等 */
 
+    /* 后续几个函数在配置解析中被调用 */
     ngx_http_lua_create_main_conf,    /*  create main configuration */
     ngx_http_lua_init_main_conf,      /*  init main configuration */
 
@@ -614,7 +616,7 @@ ngx_module_t ngx_http_lua_module = {
     NGX_HTTP_MODULE,            /*  模块儿类型 */
     NULL,                       /*  init master */
     NULL,                       /*  init module */
-    ngx_http_lua_init_worker,   /*  init process */
+    ngx_http_lua_init_worker,   /*  在worker进程for(;;)执行前被调用 */
     NULL,                       /*  init thread */
     NULL,                       /*  exit thread */
     NULL,                       /*  exit process */
@@ -622,7 +624,9 @@ ngx_module_t ngx_http_lua_module = {
     NGX_MODULE_V1_PADDING
 };
 
-
+/* 在ngx_module_t->ctx->postconfiguration()中调用，http{}配置解析完成后;
+   创建并初始化Lua虚拟机
+   */
 static ngx_int_t
 ngx_http_lua_init(ngx_conf_t *cf)
 {
@@ -664,6 +668,7 @@ ngx_http_lua_init(ngx_conf_t *cf)
 
     cmcf = ngx_http_conf_get_module_main_conf(cf, ngx_http_core_module);
 
+    /* 配置了 rewrite_by_lua* 指令 */
     if (lmcf->requires_rewrite) {
         h = ngx_array_push(&cmcf->phases[NGX_HTTP_REWRITE_PHASE].handlers);
         if (h == NULL) {
@@ -673,6 +678,7 @@ ngx_http_lua_init(ngx_conf_t *cf)
         *h = ngx_http_lua_rewrite_handler;
     }
 
+    /* 配置了 access_by_lua*指令 */
     if (lmcf->requires_access) {
         h = ngx_array_push(&cmcf->phases[NGX_HTTP_ACCESS_PHASE].handlers);
         if (h == NULL) {
@@ -684,6 +690,7 @@ ngx_http_lua_init(ngx_conf_t *cf)
 
     dd("requires log: %d", (int) lmcf->requires_log);
 
+    /* 配置了 log_by_lua*指令 */
     if (lmcf->requires_log) {
         arr = &cmcf->phases[NGX_HTTP_LOG_PHASE].handlers;
         h = ngx_array_push(arr);
@@ -700,6 +707,7 @@ ngx_http_lua_init(ngx_conf_t *cf)
         *h = ngx_http_lua_log_handler;
     }
 
+    /* 配置了 header_filter_by_lua* 指令 */
     if (multi_http_blocks || lmcf->requires_header_filter) {
         rc = ngx_http_lua_header_filter_init();
         if (rc != NGX_OK) {
@@ -707,6 +715,7 @@ ngx_http_lua_init(ngx_conf_t *cf)
         }
     }
 
+    /* 配置了 body_filter_by_lua* 指令 */
     if (multi_http_blocks || lmcf->requires_body_filter) {
         rc = ngx_http_lua_body_filter_init();
         if (rc != NGX_OK) {
@@ -725,6 +734,7 @@ ngx_http_lua_init(ngx_conf_t *cf)
     cln->handler = ngx_http_lua_sema_mm_cleanup;
 #endif
 
+    /* 初始化lua虚拟机环境 */
     if (lmcf->lua == NULL) {
         dd("initializing lua vm");
 
@@ -789,7 +799,8 @@ ngx_http_lua_lowat_check(ngx_conf_t *cf, void *post, void *data)
     return NGX_CONF_OK;
 }
 
-
+/* 分配lua nginx模块儿的主环境配置结构，挂接在ngx_cycle_t->
+   ctx[ngx_http_module index]->main_conf[ngx_http_lua_module->ctx_index] */
 static void *
 ngx_http_lua_create_main_conf(ngx_conf_t *cf)
 {
@@ -848,7 +859,7 @@ ngx_http_lua_create_main_conf(ngx_conf_t *cf)
     return lmcf;
 }
 
-
+/* 解析完毕后，利用默认值初始化主配置结构变量->main_conf[] */
 static char *
 ngx_http_lua_init_main_conf(ngx_conf_t *cf, void *conf)
 {
@@ -877,7 +888,8 @@ ngx_http_lua_init_main_conf(ngx_conf_t *cf, void *conf)
     return NGX_CONF_OK;
 }
 
-
+/* 分配lua nginx模块儿的主环境配置结构，挂接在ngx_cycle_t->
+   ctx[ngx_http_module index]->srv_conf[ngx_http_lua_module->ctx_index] */
 static void *
 ngx_http_lua_create_srv_conf(ngx_conf_t *cf)
 {
@@ -909,7 +921,7 @@ ngx_http_lua_create_srv_conf(ngx_conf_t *cf)
     return lscf;
 }
 
-
+/* 利用http{}配置信息初始化server{}未初始化的配置信息 */
 static char *
 ngx_http_lua_merge_srv_conf(ngx_conf_t *cf, void *parent, void *child)
 {
@@ -1013,7 +1025,8 @@ ngx_http_lua_merge_srv_conf(ngx_conf_t *cf, void *parent, void *child)
     return NGX_CONF_OK;
 }
 
-
+/* 分配lua nginx模块儿的主环境配置结构，挂接在ngx_cycle_t->
+   ctx[ngx_http_module index]->loc_conf[ngx_http_lua_module->ctx_index] */
 static void *
 ngx_http_lua_create_loc_conf(ngx_conf_t *cf)
 {
@@ -1078,7 +1091,7 @@ ngx_http_lua_create_loc_conf(ngx_conf_t *cf)
     return conf;
 }
 
-
+/* 利用server{}的配置信息初始化location{}未初始化的配置信息 */
 static char *
 ngx_http_lua_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child)
 {
@@ -1256,7 +1269,8 @@ ngx_http_lua_set_ssl(ngx_conf_t *cf, ngx_http_lua_loc_conf_t *llcf)
 
 #endif  /* NGX_HTTP_SSL */
 
-
+/* 在ngx_module_t->ctx->preconfiguration()中调用，配置解析前；
+   支持sbrk()的情况下，做数据页对齐，Luajit优化 */
 #if (NGX_HTTP_LUA_HAVE_MMAP_SBRK)                                            \
     && (NGX_LINUX)                                                           \
     && !(NGX_HTTP_LUA_HAVE_CONSTRUCTOR)
@@ -1280,6 +1294,10 @@ __attribute__((constructor))
 void
 ngx_http_lua_limit_data_segment(void)
 {
+    /* 参考man sbrk(): 改变进程数据段尾端地址(未初始化数据段后的第一个字节)
+                       sbrk(0)用来查找当前进程的数据段尾端地址
+       小于1G则边界页对齐
+     */
     if (sbrk(0) < (void *) 0x40000000LL) {
         mmap(ngx_align_ptr(sbrk(0), getpagesize()), 1, PROT_READ,
              MAP_FIXED|MAP_PRIVATE|MAP_ANON, -1, 0);

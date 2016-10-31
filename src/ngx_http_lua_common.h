@@ -162,7 +162,7 @@ struct ngx_http_lua_main_conf_s {
     ngx_int_t            max_running_timers;
     ngx_int_t            running_timers;
 
-    ngx_connection_t    *watcher;  /* for watching the process exit event */
+    ngx_connection_t    *watcher;    /* for watching the process exit event */
 
 #if (NGX_PCRE)
     ngx_int_t            regex_cache_entries;
@@ -398,10 +398,10 @@ struct ngx_http_lua_co_ctx_s {
     unsigned                 sem_resume_status:1;
 };
 
-
+/* 描述Lua虚拟机 */
 typedef struct {
-    lua_State       *vm;
-    ngx_int_t        count;
+    lua_State       *vm;            /* Lua虚拟机栈 */
+    ngx_int_t        count;         /* 引用计数 */
 } ngx_http_lua_vm_state_t;
 
 

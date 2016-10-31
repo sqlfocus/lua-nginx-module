@@ -2,11 +2,45 @@
 #+AUTHOR: sqlfocus
 
 
-* 入口
-*文件* ~/src/ngx_http_lua_module.c
+* 定义
+ngx_http_lua_module =~/src/ngx_http_lua_module.c=
+
+模块儿代码的阅读入口也在此，不过模块儿的初始化是穿插在nginx流程中的，
+具体参考https://github.com/sqlfocus/nginx/blob/code-note/nginx.org。
+
+* 新建Lua虚拟机
+一般情况下，在解析完http{}配置环境后，创建Lua虚拟机并根据配置信息初始化
+Lua配置环境，暴露全局变量ngx等，以便通过fork()被后续的worker进程继承。
+
+  #+BEGIN_EXAMPLE
+  -main()
+    -ngx_init_cycle()
+      -ngx_conf_parse()
+        -ngx_conf_handler()
+          -ngx_http_block()                           http{}解析入口，ngx_http.c
+            -ngx_cycle_t->modules[]->ctx->preconfiguration()
+            -ngx_conf_parse()                         递归配置解析
+            -ngx_cycle_t->modules[]->ctx->postconfiguration()
+              -ngx_http_lua_init()                    创建并初始化Lua虚拟机，ngx_http_lua_module.c
+                -注册各phase处理函数
+                -ngx_http_lua_init_vm()
+                  -ngx_http_lua_new_state()
+                    -luaL_newstate()                  创建虚拟机运行栈
+                    -luaL_openlibs()                  打开共享库
+                    -ngx_http_lua_init_registry()     初始化注册表，用于模块儿间共享
+                    -ngx_http_lua_init_globals()      初始化全局变量，如ngx、ndk等
+  -----------master+worker模式------------
+    -ngx_master_process_cycle()
+      -ngx_start_worker_processes()
+        -ngx_worker_process_cycle()                   fork()后，worker进程的执行入口点
+          -ngx_worker_process_init()
+            -ngx_modules[]->init_process()             ~/src/os/unix/ngx_process_cycle.c
+              -ngx_http_lua_init_worker()
+  #+END_EXAMPLE
 
 
-
+* 参考
+  - [[https://github.com/sqlfocus/nginx][nginx代码导读]]
 
 
 
