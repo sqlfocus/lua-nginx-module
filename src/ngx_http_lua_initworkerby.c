@@ -38,8 +38,8 @@ ngx_http_lua_init_worker(ngx_cycle_t *cycle)
     ngx_http_lua_main_conf_t    *lmcf;
     ngx_http_core_loc_conf_t    *clcf, *top_clcf;
 
+    /* 获取ngx_cycle_t->conf_ctx[ngx_http_module.index]->main_conf[ngx_http_lua_module.ctx_index] */
     lmcf = ngx_http_cycle_get_module_main_conf(cycle, ngx_http_lua_module);
-
     if (lmcf == NULL
         || lmcf->init_worker_handler == NULL
         || lmcf->lua == NULL)

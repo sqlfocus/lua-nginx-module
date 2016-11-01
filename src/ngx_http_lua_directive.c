@@ -647,7 +647,7 @@ ngx_http_lua_access_by_lua(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     return NGX_CONF_OK;
 }
 
-
+/* 处理配置指令content_by_lua_block */
 char *
 ngx_http_lua_content_by_lua_block(ngx_conf_t *cf, ngx_command_t *cmd,
     void *conf)
@@ -658,7 +658,8 @@ ngx_http_lua_content_by_lua_block(ngx_conf_t *cf, ngx_command_t *cmd,
     save = *cf;
     cf->handler = ngx_http_lua_content_by_lua;
     cf->handler_conf = conf;
-
+    
+    /* 读取整个{}包含的代码并处理; 后续处理逻辑同content_by_lua配置指令 */
     rv = ngx_http_lua_conf_lua_block_parse(cf, cmd);
 
     *cf = save;
@@ -682,11 +683,14 @@ ngx_http_lua_content_by_lua(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 
     dd("enter");
 
-    /*  must specify a content handler */
+    /* 必须指定内容处理句柄 
+       content_by_lua/content_by_lua_block : ngx_http_lua_content_handler_inline()
+       content_by_lua_file: ngx_http_lua_content_handler_file() */
     if (cmd->post == NULL) {
         return NGX_CONF_ERROR;
     }
 
+    /* 内容处理句柄具有排他性，赋值的模块儿有nginx lua、upstream等 */
     if (llcf->content_handler) {
         return "is duplicate";
     }
@@ -703,10 +707,11 @@ ngx_http_lua_content_by_lua(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         return NGX_CONF_ERROR;
     }
 
+    /* 对应指令content_by_lua/content_by_lua_block */
     if (cmd->post == ngx_http_lua_content_handler_inline) {
         chunkname = ngx_http_lua_gen_chunk_name(cf, "content_by_lua",
                                                 sizeof("content_by_lua") - 1);
-        if (chunkname == NULL) {
+        if (chunkname == NULL) {               /* 生成程序内部的块儿名 */
             return NGX_CONF_ERROR;
         }
 
@@ -716,29 +721,33 @@ ngx_http_lua_content_by_lua(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 
         /* Don't eval nginx variables for inline lua code */
 
-        llcf->content_src.value = value[1];
+        llcf->content_src.value = value[1];    /* 保存块儿值 */
 
         p = ngx_palloc(cf->pool, NGX_HTTP_LUA_INLINE_KEY_LEN + 1);
         if (p == NULL) {
             return NGX_CONF_ERROR;
         }
 
-        llcf->content_src_key = p;
+        llcf->content_src_key = p;             /* 计算执行块儿的MD5值 */
 
         p = ngx_copy(p, NGX_HTTP_LUA_INLINE_TAG, NGX_HTTP_LUA_INLINE_TAG_LEN);
         p = ngx_http_lua_digest_hex(p, value[1].data, value[1].len);
         *p = '\0';
 
-    } else {
+    }
+    /* 对应指令content_by_lua_file */
+    else {
         ngx_memzero(&ccv, sizeof(ngx_http_compile_complex_value_t));
         ccv.cf = cf;
         ccv.value = &value[1];
         ccv.complex_value = &llcf->content_src;
 
+        /* 编译对应的Lua脚本文件 */
         if (ngx_http_compile_complex_value(&ccv) != NGX_OK) {
             return NGX_CONF_ERROR;
         }
 
+        /* 计算MD5值 */
         if (llcf->content_src.lengths == NULL) {
             /* no variable found */
             p = ngx_palloc(cf->pool, NGX_HTTP_LUA_FILE_KEY_LEN + 1);
@@ -754,19 +763,21 @@ ngx_http_lua_content_by_lua(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         }
     }
 
+    /* 赋值内容处理句柄 */
     llcf->content_handler = (ngx_http_handler_pt) cmd->post;
 
     lmcf = ngx_http_conf_get_module_main_conf(cf, ngx_http_lua_module);
 
-    lmcf->requires_capture_filter = 1;
+    lmcf->requires_capture_filter = 1;         /* 设置标识 */
 
-    /*  register location content handler */
     clcf = ngx_http_conf_get_module_loc_conf(cf, ngx_http_core_module);
     if (clcf == NULL) {
         return NGX_CONF_ERROR;
     }
-
-    clcf->handler = ngx_http_lua_content_handler;   /*  */
+    
+    /* 设置对应location的处理句柄，后续在NGX_HTTP_CONTENT_PHASE阶段利用此
+       字段生成回应报文 */
+    clcf->handler = ngx_http_lua_content_handler;   
 
     return NGX_CONF_OK;
 }
@@ -1277,7 +1288,7 @@ ngx_http_lua_gen_chunk_name(ngx_conf_t *cf, const char *tag, size_t tag_len)
 
 found:
 
-    ngx_snprintf(out, len, "=%*s(%*s:%d)%Z",
+    ngx_snprintf(out, len, "=%*s(%*s:%d)%Z",    /* %Z === \n */
                  tag_len, tag, cf->conf_file->file.name.data
                                + cf->conf_file->file.name.len - p,
                  p, cf->conf_file->line);

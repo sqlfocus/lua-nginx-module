@@ -151,7 +151,7 @@ static ngx_command_t ngx_http_lua_cmds[] = {
       ngx_conf_set_flag_slot,
       NGX_HTTP_LOC_CONF_OFFSET,
       offsetof(ngx_http_lua_loc_conf_t, transform_underscores_in_resp_headers),
-      NULL },
+      NULpL },
 
      { ngx_string("lua_socket_log_errors"),
       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_HTTP_LIF_CONF

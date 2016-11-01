@@ -193,13 +193,13 @@ struct ngx_http_lua_main_conf_s {
 
     ngx_http_lua_sema_mm_t         *sema_mm;
 
-    unsigned             requires_header_filter:1;
-    unsigned             requires_body_filter:1;
-    unsigned             requires_capture_filter:1;
-    unsigned             requires_rewrite:1;
-    unsigned             requires_access:1;
-    unsigned             requires_log:1;
-    unsigned             requires_shm:1;
+    unsigned             requires_header_filter:1;   /* 拥有配置指令header_filter_by_lua* */
+    unsigned             requires_body_filter:1;     /* body_filter_by_lua* */
+    unsigned             requires_capture_filter:1;  /* content_by_lua* */
+    unsigned             requires_rewrite:1;         /* rewrite_by_lua* */
+    unsigned             requires_access:1;          /* access_by_lua* */
+    unsigned             requires_log:1;             /* log_by_lua* */
+    unsigned             requires_shm:1;             /* lua_shared_dict */
 };
 
 
@@ -267,10 +267,10 @@ typedef struct {
 
     u_char                  *access_src_key; /* cached key for access_src */
 
-    u_char                  *content_chunkname;
-    ngx_http_complex_value_t content_src;    /* 由content_by_lua系列配置指定
-                                                的lua代码串，或lua脚本路径 */
-    u_char                 *content_src_key; /* cached key for content_src */
+    u_char                  *content_chunkname; /* 自生成的内部程序块儿名 */
+    ngx_http_complex_value_t content_src;       /* 由content_by_lua*系列配置指定
+                                                   的lua代码串，或lua脚本路径 */
+    u_char                 *content_src_key;    /* content_src的MD5值 */
 
 
     u_char                      *log_chunkname;

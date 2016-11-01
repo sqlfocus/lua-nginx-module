@@ -34,10 +34,58 @@ Lua配置环境，暴露全局变量ngx等，以便通过fork()被后续的worke
       -ngx_start_worker_processes()
         -ngx_worker_process_cycle()                   fork()后，worker进程的执行入口点
           -ngx_worker_process_init()
-            -ngx_modules[]->init_process()             ~/src/os/unix/ngx_process_cycle.c
-              -ngx_http_lua_init_worker()
+            -ngx_modules[]->init_process()            ~/src/os/unix/ngx_process_cycle.c
+              -ngx_http_lua_init_worker()             worker进程运行前初始化
   #+END_EXAMPLE
 
+* 对应phase的处理函数
+nginx lua模块儿也是通过注册进nginx的各个执行阶段，达到分阶段运行的目的的；
+通过配置指令，XX_by_lua*，注册对应的脚本和执行语句。
+
+除NGX_HTTP_CONTENT_PHASE外，其他阶段都是简单的注册回调函数到
+ngx_http_core_main_conf_t->phases[]；因此这些回调函数可以和nginx的同类型
+配置语句在同阶段执行，注册先后顺序决定了执行顺序。
+
+内容处理阶段的函数回调注册到location配置的->handler处理句柄；在内容处理
+阶段，不能同其他内容处理方式并存；因此，content_by_lua*和同级别的nginx
+内容处理配置不能同时出现在同一个location中。
+
+  #+BEGIN_EXAMPLE
+  除NGX_HTTP_CONTENT_PHASE外，其他部分的初始化点及对应的函数
+  -ngx_http_lua_init()
+    -ngx_http_lua_rewrite_handler()        对应NGX_HTTP_REWRITE_PHASE           rewrite_by_lua*
+    -ngx_http_lua_access_handler()         对应NGX_HTTP_ACCESS_PHASE            access_by_lua*
+    -ngx_http_lua_log_handler()            对应NGX_HTTP_LOG_PHASE               log_by_lua*
+    -ngx_http_lua_header_filter()          加入ngx_http_top_header_filter链表   header_filter_by_lua*
+    -ngx_http_lua_body_filter()            加入ngx_http_top_body_filter链表     body_filter_by_lua*
+  #+END_EXAMPLE
+
+  #+BEGIN_EXAMPLE
+  配置指令解析
+  -ngx_http_lua_content_by_lua()           解析指令content_by_lua/content_by_lua_file
+  -ngx_http_lua_content_by_lua_block()     解析指令content_by_lua_block
+    -设置location处理句柄ngx_http_lua_content_handler()
+    -设置内容处理句柄
+       ngx_http_lua_content_handler_inline()    对应指令content_by_lua/_by_lua_block
+       ngx_http_lua_content_handler_file()      对应指令content_by_lua_file
+
+  NGX_HTTP_CONTENT_PHASE阶段
+  -location定位后
+    -ngx_http_update_location_config()
+      -设置ngx_http_request_t->content_handler 
+                                           = ngx_http_core_loc_conf_t->handler，
+                                               即ngx_http_lua_content_handler()
+  -ngx_http_core_run_phases()              phase处理入口，ngx_http_core_module.c
+    -ngx_http_core_main_conf_t->phase_engine.handlers[NGX_HTTP_CONTENT_PHASE].checker()
+    --ngx_http_core_content_phase()
+      -ngx_http_request_t->content_handler()
+      --ngx_http_lua_content_handler()     nginx lua模块儿的内容处理
+  #+END_EXAMPLE
+
+* 内容处理
+  #+BEGIN_EXAMPLE
+  -ngx_http_lua_content_handler()
+  #+END_EXAMPLE
 
 * 参考
   - [[https://github.com/sqlfocus/nginx][nginx代码导读]]

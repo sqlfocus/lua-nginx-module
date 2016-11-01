@@ -148,7 +148,7 @@ ngx_http_lua_content_wev_handler(ngx_http_request_t *r)
     (void) ctx->resume_handler(r);
 }
 
-
+/* nginx lua模块儿的内容处理阶段句柄，NGX_HTTP_CONTENT_PHASE */
 ngx_int_t
 ngx_http_lua_content_handler(ngx_http_request_t *r)
 {
