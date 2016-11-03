@@ -200,7 +200,7 @@ error:
     return NGX_ERROR;
 }
 
-
+/* 加载Lua脚本文件 */
 ngx_int_t
 ngx_http_lua_cache_loadfile(ngx_log_t *log, lua_State *L,
     const u_char *script, const u_char *cache_key)
@@ -229,6 +229,7 @@ ngx_http_lua_cache_loadfile(ngx_log_t *log, lua_State *L,
 
     dd("XXX cache key for file: [%s]", cache_key);
 
+    /* 优先加载缓存的编译结果 */
     rc = ngx_http_lua_cache_load_code(log, L, (char *) cache_key);
     if (rc == NGX_OK) {
         /*  code chunk loaded from cache, sp++ */
@@ -246,11 +247,11 @@ ngx_http_lua_cache_loadfile(ngx_log_t *log, lua_State *L,
     dd("Code cache missed! cache key='%s', stack top=%d, file path='%s'",
        cache_key, lua_gettop(L), script);
 
-    /*  load closure factory of script file to the top of lua stack, sp++ */
+    /*  只能动态加载脚本文件了，
+        load closure factory of script file to the top of lua stack, sp++ */
     rc = ngx_http_lua_clfactory_loadfile(L, (char *) script);
 
     dd("loadfile returns %d (%d)", (int) rc, LUA_ERRFILE);
-
     if (rc != 0) {
         /*  Oops! error occurred when loading Lua script */
         switch (rc) {
@@ -274,8 +275,8 @@ ngx_http_lua_cache_loadfile(ngx_log_t *log, lua_State *L,
         goto error;
     }
 
-    /*  store closure factory and gen new closure at the top of lua stack
-     *  to code cache */
+    /*  缓存起来，以便于后续加速；
+        store closure factory and gen new closure at the top of lua stack to code cache */
     rc = ngx_http_lua_cache_store_code(L, (char *) cache_key);
     if (rc != NGX_OK) {
         err = "fail to generate new closure from the closure factory";

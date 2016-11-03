@@ -266,7 +266,8 @@ ngx_http_lua_init_ctx(ngx_http_request_t *r, ngx_http_lua_ctx_t *ctx)
     ctx->request = r;
 }
 
-
+/* 构造Lua的执行环境，由lua_cache_code配置指令决定是否需要针对每个HTTP
+   请求启动不同的Lua虚拟机，以达到隔离的效果 */
 static ngx_inline ngx_http_lua_ctx_t *
 ngx_http_lua_create_ctx(ngx_http_request_t *r)
 {
@@ -282,7 +283,7 @@ ngx_http_lua_create_ctx(ngx_http_request_t *r)
     }
 
     ngx_http_lua_init_ctx(r, ctx);
-    ngx_http_set_ctx(r, ctx, ngx_http_lua_module);
+    ngx_http_set_ctx(r, ctx, ngx_http_lua_module);    /* 记录到ngx_http_request_t */
 
     llcf = ngx_http_get_module_loc_conf(r, ngx_http_lua_module);
     if (!llcf->enable_code_cache && r->connection->fd != (ngx_socket_t) -1) {
@@ -314,20 +315,23 @@ ngx_http_lua_create_ctx(ngx_http_request_t *r)
     return ctx;
 }
 
-
+/* 获取请求对应的Lua虚拟机，如果设置了配置指令"lua_code_cache off;"，
+   则ctx->vm_state存在，每个请求的执行环境都隔离，导致脚本每次都会被编译，
+   方便调试； 否则，利用全局Lua环境，所有脚本只编译一次，提高效率 */
 static ngx_inline lua_State *
 ngx_http_lua_get_lua_vm(ngx_http_request_t *r, ngx_http_lua_ctx_t *ctx)
 {
     ngx_http_lua_main_conf_t    *lmcf;
 
+    /* 如果Lua执行环境指定了虚拟机，则优先使用它 */
     if (ctx == NULL) {
         ctx = ngx_http_get_module_ctx(r, ngx_http_lua_module);
     }
-
     if (ctx && ctx->vm_state) {
         return ctx->vm_state->vm;
     }
 
+    /* 否则使用全局的虚拟机 */
     lmcf = ngx_http_get_module_main_conf(r, ngx_http_lua_module);
     dd("lmcf->lua: %p", lmcf->lua);
     return lmcf->lua;

@@ -471,9 +471,8 @@ typedef struct ngx_http_lua_ctx_s {
                                                        post_subrequest
                                                        (for subrequests only) */
 
-    unsigned                 waiting_more_body:1;   /* 1: waiting for more
-                                                       request body data;
-                                                       0: no need to wait */
+    unsigned                 waiting_more_body:1;   /* 1: 等待后续报文体
+                                                       0: 不许继续读取报文体，一般读取完毕后置位 */
 
     unsigned         co_op:2; /*  coroutine API operation */
 
@@ -488,16 +487,15 @@ typedef struct ngx_http_lua_ctx_s {
                                      0: not to be captured */
 
 
-    unsigned         read_body_done:1;      /* 1: request body has been all
-                                               read; 0: body has not been
-                                               all read */
+    unsigned         read_body_done:1;      /* 1: 请求报文体已经读取完毕
+                                               0: 请求体尚未读取完毕 */
 
     unsigned         headers_set:1; /* whether the user has set custom
                                        response headers */
 
     unsigned         entered_rewrite_phase:1;
     unsigned         entered_access_phase:1;
-    unsigned         entered_content_phase:1;
+    unsigned         entered_content_phase:1;       /* 进入内容处理阶段 */
 
     unsigned         buffering:1; /* HTTP 1.0 response body buffering flag */
 

@@ -82,16 +82,36 @@ ngx_http_core_main_conf_t->phases[]；因此这些回调函数可以和nginx的�
       --ngx_http_lua_content_handler()     nginx lua模块儿的内容处理
   #+END_EXAMPLE
 
-* TODO 内容处理
+* DONE 内容处理
+  CLOSED: [2016-11-03 Thu 18:32]
+其他阶段处理和内容类似，以此阶段为例讲述处理流程；在 =ngx_http_lua_init()= 函
+数中注册了各阶段的处理入口句柄，如内容为 =ngx_http_lua_content_handler()= ，此
+函数只是沟通起C和Lua环境之间的关联；随后，正式进入Lua环境的脚本执行，入口函数
+一般为对应配置指令的 =ngx_command_t->post= ，如 =content_by_lua= 指令的处理入
+口为 =ngx_http_lua_content_handler_inline= 。
+
+脚本的执行，都是启动单独的协程，然后在协程中处理的，以便于环境隔离；即便Lua
+脚本崩溃，也不会危及到C代码。
+
+  - 阶段入口 :: =ngx_http_lua_content_handler()/ngx_http_lua_contentby.c=
+  - 对应的Lua环境入口  :: =ngx_http_lua_content_handler_inline/ngx_http_lua_content_handler_file()=
+
   #+BEGIN_EXAMPLE
   -ngx_http_lua_content_handler()
+    -ngx_http_lua_content_handler_file()
+      -ngx_http_lua_get_lua_vm()                 加载Lua虚拟机环境
+      -ngx_http_lua_cache_loadfile()             加载脚本
+      -ngx_http_lua_content_by_chunk()           执行脚本
+        -ngx_http_lua_new_thread()
+        -ngx_http_lua_set_req()
+        -ngx_http_lua_run_thread()
   #+END_EXAMPLE
 
 * DONE 共享内存
   CLOSED: [2016-11-03 Thu 09:43]
   - 配置指令                :: =lua_shared_dict=
-  - 配置指令解析            :: =ngx_http_lua_shared_dict()=
-  - 设置各指令的Lua处理句柄 :: =ngx_http_lua_inject_shdict_api()=
+  - 配置指令解析            :: =ngx_http_lua_shared_dict()/ngx_http_lua_directive.c=
+  - 设置各指令的Lua处理句柄 :: =ngx_http_lua_inject_shdict_api()/ngx_http_lua_shdict.c=
   - ngx.shared.DICT.get()   :: =ngx_http_lua_shdict_get()=
   - ngx.shared.DICT.set()   :: =ngx_http_lua_shdict_set()=
 
@@ -104,9 +124,18 @@ Lua的定时器本质利用了worker的定时器实现，定时器信息结构ng
 那如何保存Lua环境信息呢？仅仅是在分配ngx_event_t结构时，紧挨着它分配了结构
 体ngx_http_lua_timer_ctx_t，利用它存储。
 
-  - 设置指令的处理句柄   ::  =ngx_http_lua_inject_timer_api()=
+  - 设置指令的处理句柄   ::  =ngx_http_lua_inject_timer_api()/ngx_http_lua_timer.c=
   - ngx.timer.at()       ::  =ngx_http_lua_ngx_timer_at()=
   - 定时器事件处理句柄   ::  =ngx_http_lua_timer_handler()=
+
+* TODO 协程环境隔离
+todo
+
+* TODO HTTP请求的环境隔离
+ngx_http_lua_create_ctx()/ngx_http_lua_util.h
+
+* TODO 代码缓存与关闭
+todo
 
 * 参考
   - [[https://github.com/sqlfocus/nginx][nginx代码导读]]

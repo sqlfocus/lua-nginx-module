@@ -594,7 +594,7 @@ error:
     return LUA_ERRFILE;
 }
 
-
+/* 动态加载Lua脚本文件 */
 ngx_int_t
 ngx_http_lua_clfactory_loadfile(lua_State *L, const char *filename)
 {
@@ -619,13 +619,14 @@ ngx_http_lua_clfactory_loadfile(lua_State *L, const char *filename)
 
     lua_pushfstring(L, "@%s", filename);
 
+    /* 打开文件 */
     lf.f = fopen(filename, "r");
     if (lf.f == NULL) {
         return ngx_http_lua_clfactory_errfile(L, "open", fname_index);
     }
 
+    /* 略过首行注释"#!/bin/xxx" */
     c = getc(lf.f);
-
     if (c == '#') {  /* Unix exec. file? */
         lf.extraline = 1;
 
@@ -640,6 +641,7 @@ ngx_http_lua_clfactory_loadfile(lua_State *L, const char *filename)
         sharp = 1;
     }
 
+    /* 情形1: 二进制文件，重新打开，并处理 */
     if (c == LUA_SIGNATURE[0] && filename) {  /* binary file? */
         lf.f = freopen(filename, "rb", lf.f);  /* reopen in binary mode */
 
@@ -692,6 +694,7 @@ ngx_http_lua_clfactory_loadfile(lua_State *L, const char *filename)
         lf.extraline = 0;
     }
 
+    /* 情形2: 普通文件，通过lua_load加载，解析的结果放置在栈顶 */
     if (lf.file_type == NGX_LUA_TEXT_FILE) {
         ungetc(c, lf.f);
     }
@@ -702,6 +705,7 @@ ngx_http_lua_clfactory_loadfile(lua_State *L, const char *filename)
 
     readstatus = ferror(lf.f);
 
+    /* 关闭文件 */
     if (filename) {
         fclose(lf.f);  /* close file (even in case of errors) */
     }
