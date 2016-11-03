@@ -170,7 +170,8 @@ struct ngx_http_lua_main_conf_s {
     ngx_int_t            regex_match_limit;
 #endif
 
-    ngx_array_t         *shm_zones;  /* of ngx_shm_zone_t* */
+    ngx_array_t         *shm_zones;     /* 通过配置指令lua_shared_dict申请的
+                                           共享内存描述结构指针，ngx_shm_zone_t* */
 
     ngx_array_t         *preload_hooks; /* of ngx_http_lua_preload_hook_t */
 
@@ -189,7 +190,7 @@ struct ngx_http_lua_main_conf_s {
                      * thus it is safe to store the peer data in the main conf.
                      */
 
-    ngx_uint_t                      shm_zones_inited;
+    ngx_uint_t           shm_zones_inited;           /* 已初始化的共享内存数 */
 
     ngx_http_lua_sema_mm_t         *sema_mm;
 

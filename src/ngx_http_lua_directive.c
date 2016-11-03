@@ -66,7 +66,8 @@ enum {
     FOUND_SINGLE_QUOTED
 };
 
-
+/* 配置指令"lua_shared_dict <name> <size>;" 
+     如"lua_shared_dict dogs 10m;" */
 char *
 ngx_http_lua_shared_dict(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
@@ -102,16 +103,17 @@ ngx_http_lua_shared_dict(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         return NGX_CONF_ERROR;
     }
 
+    /* 通过参数，获取共享内存的名字和大小；大小不能小于8191 */
     name = value[1];
 
     size = ngx_parse_size(&value[2]);
-
     if (size <= 8191) {
         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
                            "invalid lua shared dict size \"%V\"", &value[2]);
         return NGX_CONF_ERROR;
     }
 
+    /* 初始化共享内存的描述结构 */
     ctx = ngx_pcalloc(cf->pool, sizeof(ngx_http_lua_shdict_ctx_t));
     if (ctx == NULL) {
         return NGX_CONF_ERROR;
@@ -122,12 +124,12 @@ ngx_http_lua_shared_dict(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     ctx->log = &cf->cycle->new_log;
     ctx->cycle = cf->cycle;
 
+    /* 记录到ngx_cycle->shared_memory，待配置解析完毕后分配真实的内存 */
     zone = ngx_shared_memory_add(cf, &name, (size_t) size,
                                  &ngx_http_lua_module);
     if (zone == NULL) {
         return NGX_CONF_ERROR;
     }
-
     if (zone->data) {
         ctx = zone->data;
 
@@ -137,9 +139,11 @@ ngx_http_lua_shared_dict(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         return NGX_CONF_ERROR;
     }
 
+    /* 注册回调，在ngx_cycle_init()创建共享内存后被调用，用来根据业务初始化 */
     zone->init = ngx_http_lua_shdict_init_zone;
     zone->data = ctx;
 
+    /* 存储到共享内存指针数组 */
     zp = ngx_array_push(lmcf->shm_zones);
     if (zp == NULL) {
         return NGX_CONF_ERROR;
@@ -147,6 +151,7 @@ ngx_http_lua_shared_dict(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 
     *zp = zone;
 
+    /* 设置标识，表征有lua_shared_dict指令 */
     lmcf->requires_shm = 1;
 
     return NGX_CONF_OK;

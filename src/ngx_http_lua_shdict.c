@@ -77,7 +77,7 @@ ngx_http_lua_shdict_get_list_head(ngx_http_lua_shdict_node_t *sd, size_t len)
                                          NGX_ALIGNMENT);
 }
 
-
+/* 共享内存初始化句柄 */
 ngx_int_t
 ngx_http_lua_shdict_init_zone(ngx_shm_zone_t *shm_zone, void *data)
 {
@@ -93,6 +93,7 @@ ngx_http_lua_shdict_init_zone(ngx_shm_zone_t *shm_zone, void *data)
 
     ctx = shm_zone->data;
 
+    /* 由老的共享内存继承过来，比如reload一类的操作 */
     if (octx) {
         ctx->sh = octx->sh;
         ctx->shpool = octx->shpool;
@@ -108,11 +109,13 @@ ngx_http_lua_shdict_init_zone(ngx_shm_zone_t *shm_zone, void *data)
         goto done;
     }
 
+    /* 在共享内存分配字典的描述结构 */
     ctx->sh = ngx_slab_alloc(ctx->shpool, sizeof(ngx_http_lua_shdict_shctx_t));
     if (ctx->sh == NULL) {
         return NGX_ERROR;
     }
 
+    /* 初始化字典的红黑树结构 */
     ctx->shpool->data = ctx->sh;
 
     ngx_rbtree_init(&ctx->sh->rbtree, &ctx->sh->sentinel,
@@ -144,6 +147,7 @@ done:
 
     lmcf->shm_zones_inited++;
 
+    /* 如果通过init_by_lua*指令设置了初始化脚本，执行 */
     if (lmcf->shm_zones_inited == lmcf->shm_zones->nelts
         && lmcf->init_handler)
     {
@@ -204,7 +208,7 @@ ngx_http_lua_shdict_rbtree_insert_value(ngx_rbtree_node_t *temp,
     ngx_rbt_red(node);
 }
 
-
+/* ngx.shared.DICT字典的hash查找函数；利用key + hash值定位对应的红黑树节点 */
 static ngx_int_t
 ngx_http_lua_shdict_lookup(ngx_shm_zone_t *shm_zone, ngx_uint_t hash,
     u_char *kdata, size_t klen, ngx_http_lua_shdict_node_t **sdp)
@@ -347,7 +351,7 @@ ngx_http_lua_shdict_expire(ngx_http_lua_shdict_ctx_t *ctx, ngx_uint_t n)
     return freed;
 }
 
-
+/* 暴露ngx.shared.DICT相关操作到Lua虚拟机环境 */
 void
 ngx_http_lua_inject_shdict_api(ngx_http_lua_main_conf_t *lmcf, lua_State *L)
 {
@@ -360,9 +364,10 @@ ngx_http_lua_inject_shdict_api(ngx_http_lua_main_conf_t *lmcf, lua_State *L)
                 /* ngx.shared */
 
         lua_createtable(L, 0 /* narr */, 18 /* nrec */); /* shared mt */
-
+        
+        /* 设置ngx.shared.DICT.get()执行函数 */
         lua_pushcfunction(L, ngx_http_lua_shdict_get);
-        lua_setfield(L, -2, "get");
+        lua_setfield(L, -2, "get");     
 
         lua_pushcfunction(L, ngx_http_lua_shdict_get_stale);
         lua_setfield(L, -2, "get_stale");
@@ -441,7 +446,7 @@ ngx_http_lua_inject_shdict_api(ngx_http_lua_main_conf_t *lmcf, lua_State *L)
     lua_setfield(L, -2, "shared");
 }
 
-
+/* ngx.shared.DICT.get()执行句柄 */
 static int
 ngx_http_lua_shdict_get(lua_State *L)
 {
@@ -468,7 +473,7 @@ ngx_http_lua_shdict_get_zone(lua_State *L, int index)
     return zone;
 }
 
-
+/* Lua环境ngx.shared.DICT.get*()类指令的帮助函数入口 */
 static int
 ngx_http_lua_shdict_get_helper(lua_State *L, int get_stale)
 {
@@ -486,45 +491,53 @@ ngx_http_lua_shdict_get_helper(lua_State *L, int get_stale)
     ngx_shm_zone_t              *zone;
     uint32_t                     user_flags = 0;
 
-    n = lua_gettop(L);
-
+    n = lua_gettop(L);       /* 获取堆栈顶元素的索引；索引从1开始，0表示空栈；
+                                此函数返回的结果为堆栈内元素的个数 */
     if (n != 2) {
         return luaL_error(L, "expecting exactly two arguments, "
                           "but only seen %d", n);
     }
 
+    /* 栈内压入的第一个元素，必须为get()对应的表 */
     if (lua_type(L, 1) != LUA_TTABLE) {
         return luaL_error(L, "bad \"zone\" argument");
     }
 
+    /* 获取共享内存的描述信息结构 */
     zone = ngx_http_lua_shdict_get_zone(L, 1);
     if (zone == NULL) {
         return luaL_error(L, "bad \"zone\" argument");
     }
 
+    /* 获取对应的字典描述结构 */
     ctx = zone->data;
     name = ctx->name;
 
+    /* 情形1: 查找参数key=nil */
     if (lua_isnil(L, 2)) {
         lua_pushnil(L);
         lua_pushliteral(L, "nil key");
         return 2;
     }
 
+    /* 检查参数key是否为string，并返回其值 */
     key.data = (u_char *) luaL_checklstring(L, 2, &key.len);
 
+    /* 情形2: 查找参数key="" */
     if (key.len == 0) {
         lua_pushnil(L);
         lua_pushliteral(L, "empty key");
         return 2;
     }
 
+    /* 情形3: 查找参数key长度过大 */
     if (key.len > 65535) {
         lua_pushnil(L);
         lua_pushliteral(L, "key too long");
         return 2;
     }
 
+    /* 计算hash值 */
     hash = ngx_crc32_short(key.data, key.len);
 
 #if (NGX_DEBUG)
@@ -532,6 +545,7 @@ ngx_http_lua_shdict_get_helper(lua_State *L, int get_stale)
                    "fetching key \"%V\" in shared dict \"%V\"", &key, &name);
 #endif /* NGX_DEBUG */
 
+    /* 加锁 */
     ngx_shmtx_lock(&ctx->shpool->mutex);
 
 #if 1
@@ -540,10 +554,15 @@ ngx_http_lua_shdict_get_helper(lua_State *L, int get_stale)
     }
 #endif
 
+    /* 查找，返回结果
+          NGX_DECLINED: 无对应的值
+          NGX_DONE: 有对应的值，但已过期
+          NGX_OK: 有对应的有效值 */
     rc = ngx_http_lua_shdict_lookup(zone, hash, key.data, key.len, &sd);
 
     dd("shdict lookup returns %d", (int) rc);
 
+    /* 情形4: 经查询无返回值 */
     if (rc == NGX_DECLINED || (rc == NGX_DONE && !get_stale)) {
         ngx_shmtx_unlock(&ctx->shpool->mutex);
         lua_pushnil(L);
@@ -552,6 +571,7 @@ ngx_http_lua_shdict_get_helper(lua_State *L, int get_stale)
 
     /* rc == NGX_OK || (rc == NGX_DONE && get_stale) */
 
+    /* 情形5: 经查询有返回值 */
     value_type = sd->value_type;
 
     dd("data: %p", sd->data);
@@ -620,7 +640,7 @@ ngx_http_lua_shdict_get_helper(lua_State *L, int get_stale)
 
     ngx_shmtx_unlock(&ctx->shpool->mutex);
 
-    if (get_stale) {
+    if (get_stale) {                   /* 返回过期的数据 */
 
         /* always return value, flags, stale */
 
@@ -635,7 +655,7 @@ ngx_http_lua_shdict_get_helper(lua_State *L, int get_stale)
         return 3;
     }
 
-    if (user_flags) {
+    if (user_flags) {                  /* 返回标识 */
         lua_pushinteger(L, (lua_Integer) user_flags);
         return 2;
     }
@@ -916,7 +936,7 @@ ngx_http_lua_shdict_replace(lua_State *L)
     return ngx_http_lua_shdict_set_helper(L, NGX_HTTP_LUA_SHDICT_REPLACE);
 }
 
-
+/* ngx.shared.DICT.set()执行句柄 */
 static int
 ngx_http_lua_shdict_set(lua_State *L)
 {

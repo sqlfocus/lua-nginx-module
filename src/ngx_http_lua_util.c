@@ -3779,7 +3779,7 @@ ngx_http_lua_close_fake_connection(ngx_connection_t *c)
     }
 }
 
-
+/* 解析配置http{}后，新建并初始化Lua虚拟机环境 */
 lua_State *
 ngx_http_lua_init_vm(lua_State *parent_vm, ngx_cycle_t *cycle,
     ngx_pool_t *pool, ngx_http_lua_main_conf_t *lmcf, ngx_log_t *log,

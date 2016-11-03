@@ -82,10 +82,21 @@ ngx_http_core_main_conf_t->phases[]；因此这些回调函数可以和nginx的�
       --ngx_http_lua_content_handler()     nginx lua模块儿的内容处理
   #+END_EXAMPLE
 
-* 内容处理
+* TODO 内容处理
   #+BEGIN_EXAMPLE
   -ngx_http_lua_content_handler()
   #+END_EXAMPLE
+
+* DONE 共享内存
+  CLOSED: [2016-11-03 Thu 09:43]
+  - 配置指令                :: =lua_shared_dict=
+  - 配置指令解析            :: =ngx_http_lua_shared_dict()=
+  - 设置各指令的Lua处理句柄 :: =ngx_http_lua_inject_shdict_api()=
+  - ngx.shared.DICT.get()   :: =ngx_http_lua_shdict_get()=
+  - ngx.shared.DICT.set()   :: =ngx_http_lua_shdict_set()=
+
+* TODO 定时器
+todo
 
 * 参考
   - [[https://github.com/sqlfocus/nginx][nginx代码导读]]

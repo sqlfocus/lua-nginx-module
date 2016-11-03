@@ -31,17 +31,17 @@ typedef struct {
     u_char                       data[1];
 } ngx_http_lua_shdict_list_node_t;
 
-
+/* 字典 */
 typedef struct {
     ngx_rbtree_t                  rbtree;
     ngx_rbtree_node_t             sentinel;
     ngx_queue_t                   lru_queue;
 } ngx_http_lua_shdict_shctx_t;
 
-
+/* 共享内存的描述结构 */
 typedef struct {
-    ngx_http_lua_shdict_shctx_t  *sh;
-    ngx_slab_pool_t              *shpool;
+    ngx_http_lua_shdict_shctx_t  *sh;           /* 字典红黑树 */
+    ngx_slab_pool_t              *shpool;       /* 共享内存的起始地址 */
     ngx_str_t                     name;
     ngx_http_lua_main_conf_t     *main_conf;
     ngx_log_t                    *log;
