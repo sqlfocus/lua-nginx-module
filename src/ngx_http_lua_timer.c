@@ -15,7 +15,7 @@
 #include "ngx_http_lua_contentby.h"
 #include "ngx_http_lua_probe.h"
 
-
+/* lua定时器信息结构 */
 typedef struct {
     void        **main_conf;
     void        **srv_conf;
@@ -47,12 +47,13 @@ static u_char *ngx_http_lua_log_timer_error(ngx_log_t *log, u_char *buf,
     size_t len);
 static void ngx_http_lua_abort_pending_timers(ngx_event_t *ev);
 
-
+/* 注册ngx.timer.*的Lua虚拟机环境处理句柄 */
 void
 ngx_http_lua_inject_timer_api(lua_State *L)
 {
     lua_createtable(L, 0 /* narr */, 3 /* nrec */);    /* ngx.timer. */
 
+    /* ngx.timer.at()处理句柄 */
     lua_pushcfunction(L, ngx_http_lua_ngx_timer_at);
     lua_setfield(L, -2, "at");
 
@@ -103,7 +104,8 @@ ngx_http_lua_ngx_timer_pending_count(lua_State *L)
     return 1;
 }
 
-
+/* ngx.timer.at()处理句柄，注册定时器
+      语法：ok, err = ngx.timer.at(delay, callback, user_arg1, user_arg2, ...) */
 static int
 ngx_http_lua_ngx_timer_at(lua_State *L)
 {
@@ -126,38 +128,43 @@ ngx_http_lua_ngx_timer_at(lua_State *L)
     ngx_http_core_main_conf_t     *cmcf;
 #endif
 
-    nargs = lua_gettop(L);
+    nargs = lua_gettop(L);          /* 获取栈顶索引，即栈中元素个数，因为
+                                       索引从1开始；0表示空栈 */
     if (nargs < 2) {
         return luaL_error(L, "expecting at least 2 arguments but got %d",
                           nargs);
     }
 
+    /* 第一个压栈元素为delay，换算成毫秒 */
     delay = (ngx_msec_t) (luaL_checknumber(L, 1) * 1000);
 
+    /* 检查第二个元素是否为Lua函数且非C函数 */
     luaL_argcheck(L, lua_isfunction(L, 2) && !lua_iscfunction(L, 2), 2,
                   "Lua function expected");
 
+    /* 获取对应的请求ngx_http_request_t*；此指针在Lua的各个插入点被保存 */
     r = ngx_http_lua_get_req(L);
     if (r == NULL) {
         return luaL_error(L, "no request");
     }
 
+    /* 情形1: worker进程退出时，不能插入非即时响应的定时器 */
     ctx = ngx_http_get_module_ctx(r, ngx_http_lua_module);
-
     if (ngx_exiting && delay > 0) {
         lua_pushnil(L);
         lua_pushliteral(L, "process exiting");
         return 2;
     }
 
+    /* 控制定时器个数 */
     lmcf = ngx_http_get_module_main_conf(r, ngx_http_lua_module);
-
     if (lmcf->pending_timers >= lmcf->max_pending_timers) {
         lua_pushnil(L);
         lua_pushliteral(L, "too many pending timers");
         return 2;
     }
 
+    /* 建立监控，以便在程序退出时，释放所有定时器 */
     if (lmcf->watcher == NULL) {
         /* create the watcher fake connection */
 
@@ -186,14 +193,15 @@ ngx_http_lua_ngx_timer_at(lua_State *L)
         lmcf->watcher->data = lmcf;
     }
 
+    /* 获取对应的虚拟机，并在它之上启动协程 */
     vm = ngx_http_lua_get_lua_vm(r, ctx);
-
     co = lua_newthread(vm);
 
     /* L stack: time func [args] */
-
+    /* 外围跟踪函数 */
     ngx_http_lua_probe_user_coroutine_create(r, L, co);
 
+    /* 创建新协程的全局空表，并设置其metadata表 */
     lua_createtable(co, 0, 0);  /* the new globals table */
 
     /* co stack: global_tb */
@@ -211,6 +219,7 @@ ngx_http_lua_ngx_timer_at(lua_State *L)
 
     dd("stack top: %d", lua_gettop(L));
 
+    /* 移动新建协程到L所在的栈 */
     lua_xmove(vm, L, 1);    /* move coroutine from main thread to L */
 
     /* L stack: time func [args] thread */
@@ -225,11 +234,13 @@ ngx_http_lua_ngx_timer_at(lua_State *L)
     /* L stack: time func [args] thread */
     /* co stack: func */
 
+    /* 设置定时器执行函数的环境为当前的新建协程栈 */
     ngx_http_lua_get_globals_table(co);
     lua_setfenv(co, -2);
 
     /* co stack: func */
 
+    /* 获取注册表ngx_http_lua_coroutines_key */
     lua_pushlightuserdata(L, &ngx_http_lua_coroutines_key);
     lua_rawget(L, LUA_REGISTRYINDEX);
 
@@ -251,6 +262,7 @@ ngx_http_lua_ngx_timer_at(lua_State *L)
         /* co stack: func [args] */
     }
 
+    /* 分配事件结构 */
     p = ngx_alloc(sizeof(ngx_event_t) + sizeof(ngx_http_lua_timer_ctx_t),
                   r->connection->log);
     if (p == NULL) {
@@ -309,12 +321,13 @@ ngx_http_lua_ngx_timer_at(lua_State *L)
         tctx->vm_state = NULL;
     }
 
-    ev->handler = ngx_http_lua_timer_handler;
+    ev->handler = ngx_http_lua_timer_handler;     /* 设置定时器句柄 */
     ev->data = tctx;
     ev->log = ngx_cycle->log;
 
     lmcf->pending_timers++;
 
+    /* 添加到worker的定时器红黑树ngx_event_timer_rbtree */
     ngx_add_timer(ev, delay);
 
     lua_pushinteger(L, 1);
@@ -337,7 +350,7 @@ nomem:
     return luaL_error(L, "no memory");
 }
 
-
+/* Lua定时器事件的执行入口 */
 static void
 ngx_http_lua_timer_handler(ngx_event_t *ev)
 {
@@ -417,6 +430,7 @@ ngx_http_lua_timer_handler(ngx_event_t *ev)
 
     dd("lmcf: %p", lmcf);
 
+    /* 创建Lua定时器执行环境 */
     ctx = ngx_http_lua_create_ctx(r);
     if (ctx == NULL) {
         goto failed;
@@ -474,6 +488,7 @@ ngx_http_lua_timer_handler(ngx_event_t *ev)
     ctx->cur_co_ctx->co_top = 1;
 #endif
 
+    /* 执行Lua定时器对应的协程 */
     rc = ngx_http_lua_run_thread(L, r, ctx, n - 1);
 
     dd("timer lua run thread: %d", (int) rc);

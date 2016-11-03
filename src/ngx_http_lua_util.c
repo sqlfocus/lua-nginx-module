@@ -768,7 +768,7 @@ ngx_http_lua_inject_ngx_api(lua_State *L, ngx_http_lua_main_conf_t *lmcf,
     /* 注册报文内容生成函数，ngx.say/send_headers/print/eof/flush() */
     ngx_http_lua_inject_output_api(L);
 
-    /* 注册时钟处理函数, ngx.utctime/time/now/... */
+    /* 注册时间处理函数, ngx.utctime/time/now/... */
     ngx_http_lua_inject_time_api(L);
 
     /* 注册字符串处理函数，ngx.md5/encode_base64() */
@@ -1015,6 +1015,8 @@ ngx_http_lua_request_cleanup(ngx_http_lua_ctx_t *ctx, int forcible)
  *  NGX_DONE:       I/O interruption: r->main->count already incremented by 1
  *  NGX_ERROR:      error
  *  >= 200          HTTP status code
+ * 
+ *  Lua定时器对应的协程入口
  */
 ngx_int_t
 ngx_http_lua_run_thread(lua_State *L, ngx_http_request_t *r,

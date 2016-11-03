@@ -95,8 +95,18 @@ ngx_http_core_main_conf_t->phases[]；因此这些回调函数可以和nginx的�
   - ngx.shared.DICT.get()   :: =ngx_http_lua_shdict_get()=
   - ngx.shared.DICT.set()   :: =ngx_http_lua_shdict_set()=
 
-* TODO 定时器
-todo
+* DONE 定时器
+  CLOSED: [2016-11-03 Thu 11:03]
+Lua的定时器本质利用了worker的定时器实现，定时器信息结构ngx_event_t加入红黑
+树ngx_event_timer_rbtree，并在worker的for(;;)中以适当的时间粒度扫瞄，并执
+行到期的任务。
+
+那如何保存Lua环境信息呢？仅仅是在分配ngx_event_t结构时，紧挨着它分配了结构
+体ngx_http_lua_timer_ctx_t，利用它存储。
+
+  - 设置指令的处理句柄   ::  =ngx_http_lua_inject_timer_api()=
+  - ngx.timer.at()       ::  =ngx_http_lua_ngx_timer_at()=
+  - 定时器事件处理句柄   ::  =ngx_http_lua_timer_handler()=
 
 * 参考
   - [[https://github.com/sqlfocus/nginx][nginx代码导读]]

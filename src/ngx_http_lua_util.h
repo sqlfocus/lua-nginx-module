@@ -333,7 +333,7 @@ ngx_http_lua_get_lua_vm(ngx_http_request_t *r, ngx_http_lua_ctx_t *ctx)
     return lmcf->lua;
 }
 
-
+/* 全局变量，对应请求指针---ngx_http_request_t* */
 #define ngx_http_lua_req_key  "__ngx_req"
 
 
