@@ -182,12 +182,14 @@ ngx_http_lua_set_path(ngx_cycle_t *cycle, lua_State *L, int tab_idx,
  *         | new table | <- top
  *         |    ...    |
  * */
+/* 创建新表，并设置_G元素为自身，即全局表 */
 void
 ngx_http_lua_create_new_globals_table(lua_State *L, int narr, int nrec)
 {
-    lua_createtable(L, narr, nrec + 1);
-    lua_pushvalue(L, -1);
-    lua_setfield(L, -2, "_G");
+    lua_createtable(L, narr, nrec + 1);   /* 创建特定大小的表，并放置到栈顶 */
+    lua_pushvalue(L, -1);                 /* 复制新建表，放置到栈顶(实际内存未复制，应该只复制了地址) */
+    lua_setfield(L, -2, "_G");            /* 新建表["_G"] = 复制表；并且复制表
+                                             从栈上弹出 */
 }
 
 /* 创建Lua虚拟机实例 */
@@ -316,7 +318,9 @@ ngx_http_lua_new_state(lua_State *parent_vm, ngx_cycle_t *cycle,
     return L;
 }
 
-
+/* 创建新协程，此协程继承了老Lua虚拟机环境L的全局变量，并创建了自己的
+   全局空表；并通过注册表项&ngx_http_lua_coroutines_key的协程记录表记录
+   到老Lua环境中 */
 lua_State *
 ngx_http_lua_new_thread(ngx_http_request_t *r, lua_State *L, int *ref)
 {
@@ -326,36 +330,57 @@ ngx_http_lua_new_thread(ngx_http_request_t *r, lua_State *L, int *ref)
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                    "lua creating new thread");
 
-    base = lua_gettop(L);
+    base = lua_gettop(L);                   /* 获取栈顶索引 */
 
     lua_pushlightuserdata(L, &ngx_http_lua_coroutines_key);
-    lua_rawget(L, LUA_REGISTRYINDEX);
+    lua_rawget(L, LUA_REGISTRYINDEX);       /* 获取注册表中，索引为
+                                               &ngx_http_lua_coroutines_key的值，
+                                               即协程索引表；压入栈 */
+    /* 创建线程，实质上为协程；参考Lua5.1手册，lua_newthread()函数的描述如下：
+          Creates a new thread, pushes it on the stack, and returns a pointer
+          to a lua_State that represents this new thread. The new state returned
+          by this function shares with the original state all global objects 
+          (such as tables), but has an independent execution stack
+          新建立的线程，和原执行环境共享所有的全局表，但拥有不同的执行栈
 
+        <TAKE CARE!!!>
+        正是拥有相同的全局表，因此可通过"加载特殊模块儿"的方式在worker的不同
+        请求间达到数据共享的目的；此处的模块儿特殊之处为，它专门用于存储数据，
+        而不是处理请求 */
     co = lua_newthread(L);
 
     /*  {{{ inherit coroutine's globals to main thread's globals table
      *  for print() function will try to find tostring() in current
      *  globals table.
      */
-    /*  new globals table for coroutine */
+    /*  为新建线程创建新全局空表，其中["_G"]指向自身 */
     ngx_http_lua_create_new_globals_table(co, 0, 0);
-
+    
+    /* 新建表，做为上述表到元表，并且其["__index"]为全局变量表(索引
+       为LUA_GLOBALSINDEX)，此全局表应该是参数L对应的虚拟机的全局表 */
     lua_createtable(co, 0, 1);
     ngx_http_lua_get_globals_table(co);
     lua_setfield(co, -2, "__index");
     lua_setmetatable(co, -2);
 
-    ngx_http_lua_set_globals_table(co);
+    /* 由于lua_setmetatable()/lua_setfield()都涉及到弹出栈顶元素；因此
+       此时栈顶为ngx_http_lua_create_new_globals_table()新建的表；把它
+       设置为此新建线程的全局表(索引LUA_GLOBALSINDEX) */
+    ngx_http_lua_set_globals_table(co);     /* 伴有弹出栈顶操作 */
     /*  }}} */
 
-    *ref = luaL_ref(L, -2);
-
+    /* 在L栈索引为-2的表中创建栈顶元素的索引
+          -2为全局注册表中键“&ngx_http_lua_coroutines_key”对应的表
+          栈顶为新创建的协程结构
+       因此，结果是在L全局注册表对应特定键的表中，添加了新创建协程的索引
+    */
+    *ref = luaL_ref(L, -2);     
     if (*ref == LUA_NOREF) {
         lua_settop(L, base);  /* restore main thread stack */
         return NULL;
     }
 
-    lua_settop(L, base);
+    lua_settop(L, base);        /* 恢复L的栈 */
     return co;
 }
 
@@ -1016,7 +1041,7 @@ ngx_http_lua_request_cleanup(ngx_http_lua_ctx_t *ctx, int forcible)
  *  NGX_ERROR:      error
  *  >= 200          HTTP status code
  * 
- *  Lua定时器对应的协程入口
+ *  Lua协程的执行入口
  */
 ngx_int_t
 ngx_http_lua_run_thread(lua_State *L, ngx_http_request_t *r,
@@ -1037,10 +1062,22 @@ ngx_http_lua_run_thread(lua_State *L, ngx_http_request_t *r,
                    r->main->count);
 
     /* set Lua VM panic handler */
+    /* 参考Lua5.1参考手册，lua_atpanic()
+       If an error happens outside any protected environment, Lua calls a 
+       panic function and then calls exit(EXIT_FAILURE), thus exiting the 
+       host application. Your panic function can avoid this exit by never 
+       returning (e.g., doing a long jump). 
+       
+       注册新的panic处理函数，以防止执行exit()使得worker进程退出；可以通过
+       long jmp，跳转到最近的代码点
+
+       <TAKE CARE!!!>就是通过此手段，即便Lua脚本崩溃了，也不会影响nginx的
+                     正常流程，牛逼阿!!!  */
     lua_atpanic(L, ngx_http_lua_atpanic);
 
     dd("ctx = %p", ctx);
 
+    /* 利用longjmp实现的try-catch，以防止Lua脚本崩溃导致worker异常退出 */
     NGX_LUA_EXCEPTION_TRY {
 
         if (ctx->cur_co_ctx->thread_spawn_yielded) {
@@ -1050,6 +1087,7 @@ ngx_http_lua_run_thread(lua_State *L, ngx_http_request_t *r,
             nrets = 1;
         }
 
+        /* 线程主循环 */
         for ( ;; ) {
 
             dd("calling lua_resume: vm %p, nret %d", ctx->cur_co_ctx->co,
@@ -1083,6 +1121,10 @@ ngx_http_lua_run_thread(lua_State *L, ngx_http_request_t *r,
             ngx_http_lua_assert(orig_coctx->co_top + nrets
                                 == lua_gettop(orig_coctx->co));
 
+            /* 协程的resume，恢复运行；
+                  返回值为0, 表示执行完毕
+                  返回值为LUA_YIELD，表示主动让出执行权限
+               无论何种情况，栈中都会压入返回结果或lua_yield的入参 */
             rv = lua_resume(orig_coctx->co, nrets);
 
 #if (NGX_PCRE)
@@ -1100,8 +1142,12 @@ ngx_http_lua_run_thread(lua_State *L, ngx_http_request_t *r,
             ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                            "lua resume returned %d", rv);
 
+            /* 返回值处理，分两大类，0或者LUA_YIELD;
+               1) 对于LUA_YIELD，表征资源不到位或遇到了阻塞性操作，主动
+                  让出CPU，后续利用事件驱动的方式通知并重启此协程
+               2) 对于0, 表示处理结束 */
             switch (rv) {
-            case LUA_YIELD:
+            case LUA_YIELD:          
                 /*  yielded, let event handler do the rest job */
                 /*  FIXME: add io cmd dispatcher here */
 
@@ -1253,6 +1299,7 @@ ngx_http_lua_run_thread(lua_State *L, ngx_http_request_t *r,
 
                 ngx_http_lua_probe_coroutine_done(r, ctx->cur_co_ctx->co, 1);
 
+                /* 设置协程状态，ngx_http_lua_co_status_t，表示已完成任务 */
                 ctx->cur_co_ctx->co_status = NGX_HTTP_LUA_CO_DEAD;
 
                 if (ctx->cur_co_ctx->zombie_child_threads) {
@@ -1551,6 +1598,7 @@ no_parent:
 
 done:
 
+    /* 内容处理完毕，调用发送函数 */
     if (ctx->entered_content_phase
         && r->connection->fd != (ngx_socket_t) -1)
     {

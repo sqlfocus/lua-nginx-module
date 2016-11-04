@@ -358,7 +358,7 @@ ngx_http_lua_get_req(lua_State *L)
     return r;
 }
 
-
+/* 设置全局变量ngx_http_lua_req_key，即索引["__ngx_req"]的值 */
 static ngx_inline void
 ngx_http_lua_set_req(lua_State *L, ngx_http_request_t *r)
 {
@@ -366,14 +366,14 @@ ngx_http_lua_set_req(lua_State *L, ngx_http_request_t *r)
     lua_setglobal(L, ngx_http_lua_req_key);
 }
 
-
+/* 提取全局变量表指针压入堆栈 */
 static ngx_inline void
 ngx_http_lua_get_globals_table(lua_State *L)
 {
     lua_pushvalue(L, LUA_GLOBALSINDEX);
 }
 
-
+/* 利用栈顶元素替换全局变量表指针，并弹出栈顶 */
 static ngx_inline void
 ngx_http_lua_set_globals_table(lua_State *L)
 {

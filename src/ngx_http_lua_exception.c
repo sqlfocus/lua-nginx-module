@@ -27,6 +27,8 @@ jmp_buf ngx_http_lua_exception;
  * @note nginx request pointer should be stored in Lua thread's globals table
  * in order to make logging working.
  * */
+/* Lua执行环境发生异常崩溃后，执行的自定义panic函数；以防止默认行为(exit())
+   使得nginx worker进程退出 */
 int
 ngx_http_lua_atpanic(lua_State *L)
 {

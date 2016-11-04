@@ -132,8 +132,27 @@ Lua的定时器本质利用了worker的定时器实现，定时器信息结构ng
   - ngx.timer.at()       ::  =ngx_http_lua_ngx_timer_at()=
   - 定时器事件处理句柄   ::  =ngx_http_lua_timer_handler()=
 
-* TODO 协程环境隔离
-todo
+* DONE 协程环境隔离
+  CLOSED: [2016-11-04 Fri 17:57]
+同样，以内容处理流程来介绍，每个HTTP请求处理过程中启、停协程的过程，加
+深对Lua环境的理解，加深对“短连接”概念的理解。
+
+  #+BEGIN_EXAMPLE
+  -ngx_http_lua_content_by_chunk()              内容阶段执行Lua脚本, ngx_http_lua_contentby.c
+    -ngx_http_get_module_ctx()                  获取Lua执行环境，没有则创建
+    -ngx_http_lua_new_thread()                  创建协程
+      -lua_newthread()
+      -ngx_http_lua_set_globals_table()             设置新的全局表
+    -lua_xmove()                                脚本代码移动到协程
+    -lua_setfenv()                              设置脚本代码的执行环境为新建协程
+    -ngx_http_lua_set_req()                     关联请求
+    -ngx_http_lua_run_thread()                  启动协程
+      -lua_atpanic()                                设置自定义panic函数，防止Lua脚本代码崩溃传导到worker进程
+      -NGX_LUA_EXCEPTION_TRY                        利用longjmp实现的错误处理机制，配合panic函数；牛逼！！！
+        -for(;;)
+          -lua_resume()
+      -NGX_LUA_EXCEPTION_CATCH
+  #+END_EXAMPLE
 
 * DONE HTTP请求的环境隔离
   CLOSED: [2016-11-04 Fri 14:33]
@@ -153,6 +172,11 @@ todo
     -if()                                     "lua_code_cache off;"
       -ngx_http_lua_init_vm()                 记录到ngx_http_lua_ctx_t->vm_state
   #+END_EXAMPLE
+
+* TODO Lua自定义PANIC函数
+ngx_http_lua_atpanic() / ngx_http_lua_exception.c
+NGX_LUA_EXCEPTION_TRY
+NGX_LUA_EXCEPTION_CATCH
 
 * 参考
   - [[https://github.com/sqlfocus/nginx][nginx代码导读]]

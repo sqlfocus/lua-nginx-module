@@ -35,7 +35,7 @@ ngx_http_lua_content_by_chunk(lua_State *L, ngx_http_request_t *r)
 
     dd("content by chunk");
 
-    /* 获取执行环境 */
+    /* 获取执行环境，没有则创建 */
     ctx = ngx_http_get_module_ctx(r, ngx_http_lua_module);
     if (ctx == NULL) {
         ctx = ngx_http_lua_create_ctx(r);
@@ -47,9 +47,9 @@ ngx_http_lua_content_by_chunk(lua_State *L, ngx_http_request_t *r)
         dd("reset ctx");
         ngx_http_lua_reset_ctx(r, L, ctx);
     }
-    ctx->entered_content_phase = 1;
+    ctx->entered_content_phase = 1;           /* 设置进入内容处理阶段 */
 
-    /* 启动新协程 */
+    /* 创建新协程，以便针对当前HTTP请求执行Lua脚本 */
     /*  {{{ new coroutine to handle request */
     co = ngx_http_lua_new_thread(r, L, &co_ref);
     if (co == NULL) {
@@ -59,16 +59,18 @@ ngx_http_lua_content_by_chunk(lua_State *L, ngx_http_request_t *r)
         return NGX_HTTP_INTERNAL_SERVER_ERROR;
     }
 
-    /*  move code closure to new coroutine */
+    /*  调用ngx_http_lua_content_by_chunk()时，栈顶元素为编译完毕的代码块儿；
+        此处的操作为，移动此代码块儿到新建的协程中 */
     lua_xmove(L, co, 1);
 
-    /*  set closure's env table to new coroutine's globals table */
+    /*  设置代码块儿的执行环境为，新建协程的全局表 */
     ngx_http_lua_get_globals_table(co);
-    lua_setfenv(co, -2);
-
-    /*  设置协程对应的请求，save nginx request in coroutine globals table */
+    lua_setfenv(co, -2);      /* 副作用：弹出了栈顶的全局表 */
+    
+    /*  记录对应的请求指针，到变量_G["__ngx_req"] */
     ngx_http_lua_set_req(co, r);
 
+    /* 记录新建的协程栈，及其索引 */
     ctx->cur_co_ctx = &ctx->entry_co_ctx;
     ctx->cur_co_ctx->co = co;
     ctx->cur_co_ctx->co_ref = co_ref;
@@ -76,14 +78,16 @@ ngx_http_lua_content_by_chunk(lua_State *L, ngx_http_request_t *r)
     ctx->cur_co_ctx->co_top = 1;
 #endif
 
-    /*  {{{ register request cleanup hooks */
+    /* 注册清理句柄到ngx_http_request_t->cleanup链表，当请求资源释放
+       时，清理对应的协程
+       {{{ register request cleanup hooks */
     if (ctx->cleanup == NULL) {
         cln = ngx_http_cleanup_add(r, 0);
         if (cln == NULL) {
             return NGX_HTTP_INTERNAL_SERVER_ERROR;
         }
 
-        cln->handler = ngx_http_lua_request_cleanup_handler;
+        cln->handler = ngx_http_lua_request_cleanup_handler;   /* 清理句柄 */
         cln->data = ctx;
         ctx->cleanup = &cln->handler;
     }
@@ -91,8 +95,8 @@ ngx_http_lua_content_by_chunk(lua_State *L, ngx_http_request_t *r)
 
     ctx->context = NGX_HTTP_LUA_CONTEXT_CONTENT;
 
+    /* 已经进入内容处理，不再允许读新数据 */
     llcf = ngx_http_get_module_loc_conf(r, ngx_http_lua_module);
-
     if (llcf->check_client_abort) {
         r->read_event_handler = ngx_http_lua_rd_check_broken_connection;
 
@@ -116,7 +120,12 @@ ngx_http_lua_content_by_chunk(lua_State *L, ngx_http_request_t *r)
         r->read_event_handler = ngx_http_block_reading;
     }
 
-    /* 启动协程 */
+    /* 启动协程，执行对应的代码块儿，返回值如下：
+           NGX_AGAIN:      I/O interruption: r->main->count intact
+           NGX_DONE:       I/O interruption: r->main->count already incremented by 1
+           NGX_ERROR:      error
+           >= 200          HTTP status code
+     */
     rc = ngx_http_lua_run_thread(L, r, ctx, 0);
     if (rc == NGX_ERROR || rc >= NGX_OK) {
         return rc;
@@ -283,6 +292,7 @@ ngx_http_lua_content_handler_file(ngx_http_request_t *r)
         return rc;
     }
 
+    
     /*  make sure we have a valid code chunk */
     ngx_http_lua_assert(lua_isfunction(L, -1));
 

@@ -342,14 +342,14 @@ enum {
 
 /* Lua协程的执行环境 */
 struct ngx_http_lua_co_ctx_s {
-    void                    *data;      /* user state for cosockets */
+    void                    *data;          /* user state for cosockets */
 
-    lua_State               *co;
+    lua_State               *co;            /* 协程栈 */
     ngx_http_lua_co_ctx_t   *parent_co_ctx;
 
     ngx_http_lua_posted_thread_t    *zombie_child_threads;
 
-    ngx_http_cleanup_pt      cleanup;
+    ngx_http_cleanup_pt      cleanup;      /*  */
 
     ngx_int_t               *sr_statuses; /* all capture subrequest statuses */
 
@@ -374,7 +374,9 @@ struct ngx_http_lua_co_ctx_s {
                                         only for sanity checks */
 #endif
 
-    int                      co_ref; /*  reference to anchor the thread
+    int                      co_ref; /*  此协程栈在Lua全局注册表特定项对应表
+                                         中的索引，以防止此协程的栈被GC释放
+                                         reference to anchor the thread
                                          coroutines (entry coroutine and user
                                          threads) in the Lua registry,
                                          preventing the thread coroutine
@@ -384,7 +386,7 @@ struct ngx_http_lua_co_ctx_s {
     unsigned                 waited_by_parent:1;  /* whether being waited by
                                                      a parent coroutine */
 
-    unsigned                 co_status:3;  /* the current coroutine's status */
+    unsigned                 co_status:3;  /* 协程的状态，如NGX_HTTP_LUA_CO_DEAD */
 
     unsigned                 flushing:1; /* indicates whether the current
                                             coroutine is waiting for
@@ -414,14 +416,14 @@ typedef struct ngx_http_lua_ctx_s {
     ngx_http_handler_pt      resume_handler;  /* 执行环境恢复句柄，赋值
                                                  为ngx_http_lua_wev_handler */
 
-    ngx_http_lua_co_ctx_t   *cur_co_ctx; /* co ctx for the current coroutine */
+    ngx_http_lua_co_ctx_t   *cur_co_ctx;      /* 当前协程的执行环境，初始化为&entry_co_ctx */
 
     /* FIXME: we should use rbtree here to prevent O(n) lookup overhead */
-    ngx_list_t              *user_co_ctx; /* coroutine contexts for user
-                                             coroutines */
+    ngx_list_t              *user_co_ctx;     /* coroutine contexts for user
+                                                 coroutines */
 
-    ngx_http_lua_co_ctx_t    entry_co_ctx; /* coroutine context for the
-                                              entry coroutine */
+    ngx_http_lua_co_ctx_t    entry_co_ctx;    /* 入口协程执行环境，coroutine context for the
+                                                 entry coroutine */
 
     ngx_http_lua_co_ctx_t   *on_abort_co_ctx; /* coroutine context for the
                                                  on_abort thread */
@@ -438,7 +440,8 @@ typedef struct ngx_http_lua_ctx_s {
     ngx_chain_t             *busy_bufs;
     ngx_chain_t             *free_recv_bufs;
 
-    ngx_http_cleanup_pt     *cleanup;
+    ngx_http_cleanup_pt     *cleanup;      /* 协程资源清理句柄, 设置为
+                                              ngx_http_lua_request_cleanup_handler() */
 
     ngx_http_cleanup_t      *free_cleanup; /* free list of cleanup records */
 
@@ -464,7 +467,10 @@ typedef struct ngx_http_lua_ctx_s {
 
     int                      uthreads; /* number of active user threads */
 
-    uint16_t                 context;   /* the current running directive context
+    uint16_t                 context;   /* 当前代码块儿所处的指令环境，
+                                           如NGX_HTTP_LUA_CONTEXT_CONTENT
+
+                                           the current running directive context
                                            (or running phase) for the current
                                            Lua chunk */
 
