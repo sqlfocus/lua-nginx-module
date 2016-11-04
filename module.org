@@ -109,6 +109,10 @@ ngx_http_core_main_conf_t->phases[]；因此这些回调函数可以和nginx的�
 
 * DONE 共享内存
   CLOSED: [2016-11-03 Thu 09:43]
+本模块儿的共享内存也是借助nginx的共享内存管理机制；只是在此基础上封装了
+Lua的环境，并提供给Lua使用而已(在Lua端看来，就是表，是不是越来越感觉到
+有点函数式编程的意味了!!!)。
+
   - 配置指令                :: =lua_shared_dict=
   - 配置指令解析            :: =ngx_http_lua_shared_dict()/ngx_http_lua_directive.c=
   - 设置各指令的Lua处理句柄 :: =ngx_http_lua_inject_shdict_api()/ngx_http_lua_shdict.c=
@@ -131,11 +135,24 @@ Lua的定时器本质利用了worker的定时器实现，定时器信息结构ng
 * TODO 协程环境隔离
 todo
 
-* TODO HTTP请求的环境隔离
-ngx_http_lua_create_ctx()/ngx_http_lua_util.h
+* DONE HTTP请求的环境隔离
+  CLOSED: [2016-11-04 Fri 14:33]
+如果配置lua_code_cache设置了值off，则每个HTTP请求都会设置独立的Lua虚拟机；
+这样，每个请求都需要动态加载通过nginx.conf配置的Lua脚本，从而极大的方便了
+程序开发与调试。
 
-* TODO 代码缓存与关闭
-todo
+当开发完毕后，配置指令lua_code_cache设置为on，则每个worker利用启动前创建的
+虚拟机环境，所有Lua脚本仅编译加载一次，极大提高了运行效率。
+
+  #+BEGIN_EXAMPLE
+  -ngx_http_lua_create_ctx()                  创建Lua运行环境，ngx_http_lua_util.h
+                                                  此函数在nginx的phase阶段(Lua注册
+                                                  的函数中)被调用
+    -ngx_http_set_ctx()                       存储到ngx_http_request_t，可通过
+                                                  ngx_http_get_module_ctx()获取
+    -if()                                     "lua_code_cache off;"
+      -ngx_http_lua_init_vm()                 记录到ngx_http_lua_ctx_t->vm_state
+  #+END_EXAMPLE
 
 * 参考
   - [[https://github.com/sqlfocus/nginx][nginx代码导读]]

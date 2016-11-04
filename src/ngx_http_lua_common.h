@@ -340,7 +340,7 @@ enum {
     NGX_HTTP_LUA_SUBREQ_TRUNCATED = 1
 };
 
-
+/* Lua协程的执行环境 */
 struct ngx_http_lua_co_ctx_s {
     void                    *data;      /* user state for cosockets */
 
@@ -405,13 +405,14 @@ typedef struct {
     ngx_int_t        count;         /* 引用计数 */
 } ngx_http_lua_vm_state_t;
 
-
+/* Lua的执行环境，是沟通起nginx的C环境和Lua环境的桥梁 */
 typedef struct ngx_http_lua_ctx_s {
-    /* for lua_coce_cache off: */
-    ngx_http_lua_vm_state_t  *vm_state;
-
-    ngx_http_request_t      *request;
-    ngx_http_handler_pt      resume_handler;
+    ngx_http_lua_vm_state_t  *vm_state;       /* 对应配置指令lua_coce_cache off
+                                                 每个请求对应一个新的虚拟机，以
+                                                 便于每次都重新加载脚本 */
+    ngx_http_request_t      *request;         /* 对应当前的HTTP请求 */
+    ngx_http_handler_pt      resume_handler;  /* 执行环境恢复句柄，赋值
+                                                 为ngx_http_lua_wev_handler */
 
     ngx_http_lua_co_ctx_t   *cur_co_ctx; /* co ctx for the current coroutine */
 

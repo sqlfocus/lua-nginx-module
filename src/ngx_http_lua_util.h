@@ -255,7 +255,7 @@ void ngx_http_lua_cleanup_free(ngx_http_request_t *r,
         return luaL_error(L, "attempt to abort with pending subrequests");  \
     }
 
-
+/* 初始化Lua的执行环境 */
 static ngx_inline void
 ngx_http_lua_init_ctx(ngx_http_request_t *r, ngx_http_lua_ctx_t *ctx)
 {
@@ -266,7 +266,7 @@ ngx_http_lua_init_ctx(ngx_http_request_t *r, ngx_http_lua_ctx_t *ctx)
     ctx->request = r;
 }
 
-/* 构造Lua的执行环境，由lua_cache_code配置指令决定是否需要针对每个HTTP
+/* 构造Lua的执行环境，由lua_code_cache配置指令决定是否需要针对每个HTTP
    请求启动不同的Lua虚拟机，以达到隔离的效果 */
 static ngx_inline ngx_http_lua_ctx_t *
 ngx_http_lua_create_ctx(ngx_http_request_t *r)
@@ -277,20 +277,23 @@ ngx_http_lua_create_ctx(ngx_http_request_t *r)
     ngx_http_lua_loc_conf_t     *llcf;
     ngx_http_lua_main_conf_t    *lmcf;
 
+    /* 分配Lua虚拟机环境 */
     ctx = ngx_palloc(r->pool, sizeof(ngx_http_lua_ctx_t));
     if (ctx == NULL) {
         return NULL;
     }
-
     ngx_http_lua_init_ctx(r, ctx);
-    ngx_http_set_ctx(r, ctx, ngx_http_lua_module);    /* 记录到ngx_http_request_t */
+    /* 记录到ngx_http_request_t */
+    ngx_http_set_ctx(r, ctx, ngx_http_lua_module);
 
+    /* 当配置指令lua_code_cache为off时，创建新虚拟机 */
     llcf = ngx_http_get_module_loc_conf(r, ngx_http_lua_module);
     if (!llcf->enable_code_cache && r->connection->fd != (ngx_socket_t) -1) {
         lmcf = ngx_http_get_module_main_conf(r, ngx_http_lua_module);
 
         dd("lmcf: %p", lmcf);
 
+        /* 创建新虚拟机，主进程建立的虚拟机为父环境 */
         L = ngx_http_lua_init_vm(lmcf->lua, lmcf->cycle, r->pool, lmcf,
                                  r->connection->log, &cln);
         if (L == NULL) {
@@ -299,6 +302,7 @@ ngx_http_lua_create_ctx(ngx_http_request_t *r)
             return NULL;
         }
 
+        /* 执行配置指令init_by_lua*指定的脚本和代码段 */
         if (lmcf->init_handler) {
             if (lmcf->init_handler(r->connection->log, lmcf, L) != NGX_OK) {
                 /* an error happened */
@@ -306,6 +310,7 @@ ngx_http_lua_create_ctx(ngx_http_request_t *r)
             }
         }
 
+        /* 记录新建虚拟机到Lua环境 */
         ctx->vm_state = cln->data;
 
     } else {
