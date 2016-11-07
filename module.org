@@ -173,10 +173,41 @@ Lua的定时器本质利用了worker的定时器实现，定时器信息结构ng
       -ngx_http_lua_init_vm()                 记录到ngx_http_lua_ctx_t->vm_state
   #+END_EXAMPLE
 
-* TODO Lua自定义PANIC函数
-ngx_http_lua_atpanic() / ngx_http_lua_exception.c
-NGX_LUA_EXCEPTION_TRY
-NGX_LUA_EXCEPTION_CATCH
+* DONE Lua自定义PANIC函数
+  CLOSED: [2016-11-07 Mon 10:58]
+nginx的lua环境和nginx的c是隔离开的，即Lua脚本代码的严重错误不会影响nginx
+的进程，有点类似于进程空间隔离了；它是利用longjmp机制实现的，一旦错误发生
+直接跳过Lua脚本代码块儿，回归C环境，继续后续处理。
+
+  #+BEGIN_EXAMPLE
+  -ngx_http_lua_content_by_chunk()               内容处理脚本的执行入口
+    -ngx_http_lua_run_thread()                   Lua协程入口，ngx_http_lua_util.c
+      -lua_atpanic()                             定义Lua环境panic的入口点ngx_http_lua_atpanic()
+      -NGX_LUA_EXCEPTION_TRY {
+        -执行Lua脚本块儿
+      -}
+      -NGX_LUA_EXCEPTION_CATCH {                 longjmp异常处理点
+        -仅输出，无实质动作
+      -}
+      -return NGX_ERROR
+
+
+  #define NGX_LUA_EXCEPTION_TRY       \
+    if (setjmp(ngx_http_lua_exception) == 0)
+
+  #define NGX_LUA_EXCEPTION_CATCH     \
+    else
+
+  #define NGX_LUA_EXCEPTION_THROW(x)  \
+    longjmp(ngx_http_lua_exception, (x))
+  #+END_EXAMPLE
+
+  #+BEGIN_EXAMPLE
+  -ngx_http_lua_atpanic()                        异常处理入口点，ngx_http_lua_exception.c
+    -...错误处理，日志等
+    -设置ngx_quit = 1
+    -NGX_LUA_EXCEPTION_THROW()
+  #+END_EXAMPLE
 
 * 参考
   - [[https://github.com/sqlfocus/nginx][nginx代码导读]]

@@ -15,7 +15,9 @@
 #include "ngx_http_lua_util.h"
 
 
-/*  longjmp mark for restoring nginx execution after Lua VM crashing */
+/*  Lua虚拟机崩溃后，长跳转的点；
+    长跳转被宏NGX_LUA_EXCEPTION_TRY、NGX_LUA_EXCEPTION_CATCH、NGX_LUA_EXCEPTION_THROW实现
+    longjmp mark for restoring nginx execution after Lua VM crashing */
 jmp_buf ngx_http_lua_exception;
 
 /**
