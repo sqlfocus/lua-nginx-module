@@ -328,7 +328,8 @@ ngx_http_lua_get_lua_vm(ngx_http_request_t *r, ngx_http_lua_ctx_t *ctx)
 {
     ngx_http_lua_main_conf_t    *lmcf;
 
-    /* 如果Lua执行环境指定了虚拟机，则优先使用它 */
+    /* 如果Lua执行环境指定了虚拟机，则优先使用它
+       <NOTE>此处为了支持配置指令“lua_code_cache off”，每请求一个单独的Lua虚拟机 */
     if (ctx == NULL) {
         ctx = ngx_http_get_module_ctx(r, ngx_http_lua_module);
     }
@@ -336,7 +337,7 @@ ngx_http_lua_get_lua_vm(ngx_http_request_t *r, ngx_http_lua_ctx_t *ctx)
         return ctx->vm_state->vm;
     }
 
-    /* 否则使用全局的虚拟机 */
+    /* 缓存Lua代码时，使用全局的虚拟机 */
     lmcf = ngx_http_get_module_main_conf(r, ngx_http_lua_module);
     dd("lmcf->lua: %p", lmcf->lua);
     return lmcf->lua;
@@ -366,7 +367,7 @@ ngx_http_lua_set_req(lua_State *L, ngx_http_request_t *r)
     lua_setglobal(L, ngx_http_lua_req_key);
 }
 
-/* 提取全局变量表指针压入堆栈 */
+/* 提取thread environment表，即此协程对应的全局变量表 */
 static ngx_inline void
 ngx_http_lua_get_globals_table(lua_State *L)
 {

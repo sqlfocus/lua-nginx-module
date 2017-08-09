@@ -40,10 +40,10 @@ ngx_http_lua_atpanic(lua_State *L)
     u_char                  *s = NULL;
     size_t                   len = 0;
 
+    /* 提取栈顶的错误信息 */
     if (lua_type(L, -1) == LUA_TSTRING) {
         s = (u_char *) lua_tolstring(L, -1, &len);
     }
-
     if (s == NULL) {
         s = (u_char *) "unknown reason";
         len = sizeof("unknown reason") - 1;
@@ -52,7 +52,8 @@ ngx_http_lua_atpanic(lua_State *L)
     ngx_log_stderr(0, "lua atpanic: Lua VM crashed, reason: %*s", len, s);
     ngx_quit = 1;
 
-    /*  restore nginx execution */
+    /* 跳转到最近的注册点，即 NGX_LUA_EXCEPTION_TRY 宏所在的位置
+       restore nginx execution */
     NGX_LUA_EXCEPTION_THROW(1);
 
     /* impossible to reach here */

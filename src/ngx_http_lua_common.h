@@ -188,7 +188,7 @@ struct ngx_shm_zone_s {
 
     ngx_array_t *preload_hooks; /* of ngx_http_lua_preload_hook_t */
 
-    ngx_flag_t  postponed_to_rewrite_phase_end;
+    ngx_flag_t  postponed_to_rewrite_phase_end;  /* Lua脚本是否在本阶段最后执行 */
     ngx_flag_t  postponed_to_access_phase_end;
 
     ngx_http_lua_main_conf_handler_pt    init_handler;
@@ -284,7 +284,7 @@ typedef struct {
     u_char                  *content_chunkname; /* 自生成的内部程序块儿名 */
     ngx_http_complex_value_t content_src;       /* 由content_by_lua*系列配置指定
                                                    的lua代码串，或lua脚本路径 */
-    u_char                 *content_src_key;    /* content_src的MD5值 */
+    u_char                 *content_src_key;    /* content_src的MD5值，用作注册表中编译后代码缓存块儿的key */
 
 
     u_char                      *log_chunkname;
@@ -353,16 +353,16 @@ enum {
     NGX_HTTP_LUA_SUBREQ_TRUNCATED = 1
 };
 
-/* Lua协程的执行环境 */
+/* 跟踪特定阶段的Lua协程环境 */
 struct ngx_http_lua_co_ctx_s {
     void                    *data;          /* user state for cosockets */
 
-    lua_State               *co;            /* 协程栈 */
-    ngx_http_lua_co_ctx_t   *parent_co_ctx;
+    lua_State  *co;     /* 通过lua_newthread()创建的协程栈 */
+    ngx_http_lua_co_ctx_t *parent_co_ctx;   /* 对应的父协程 */
 
-    ngx_http_lua_posted_thread_t    *zombie_child_threads;
+    ngx_http_lua_posted_thread_t *zombie_child_threads;  /* 子协程主动释放后，加入此 */
 
-    ngx_http_cleanup_pt      cleanup;      /*  */
+    ngx_http_cleanup_pt cleanup;      /*  */
 
     ngx_int_t               *sr_statuses; /* all capture subrequest statuses */
 
@@ -383,35 +383,29 @@ struct ngx_http_lua_co_ctx_s {
     ngx_queue_t              sem_wait_queue;
 
 #ifdef NGX_LUA_USE_ASSERT
-    int                      co_top; /* stack top after yielding/creation,
-                                        only for sanity checks */
+    int co_top;         /* 栈顶元素索引，仅用于恢复执行时，堆栈健康检查
+                           stack top after yielding/creation, only for sanity checks */
 #endif
 
-    int                      co_ref; /*  此协程栈在Lua全局注册表特定项对应表
-                                         中的索引，以防止此协程的栈被GC释放
-                                         reference to anchor the thread
-                                         coroutines (entry coroutine and user
-                                         threads) in the Lua registry,
-                                         preventing the thread coroutine
-                                         from beging collected by the
-                                         Lua GC */
+    int co_ref;         /* 全局Lua虚拟机全局注册表ngx_http_lua_coroutines_key项
+                           中，此协程对应的索引，以防止此协程的栈被GC释放
+                           reference to anchor the thread coroutines (entry 
+                           coroutine and user threads) in the Lua registry,
+                           preventing the thread coroutine from beging collected
+                           by the Lua GC */
 
-    unsigned                 waited_by_parent:1;  /* whether being waited by
-                                                     a parent coroutine */
+    unsigned waited_by_parent:1;  /* whether being waited by a parent coroutine */
 
-    unsigned                 co_status:3;  /* 协程的状态，如NGX_HTTP_LUA_CO_DEAD */
+    unsigned co_status:3;  /* 协程的状态，如 NGX_HTTP_LUA_CO_DEAD */
 
     unsigned                 flushing:1; /* indicates whether the current
                                             coroutine is waiting for
                                             ngx.flush(true) */
 
-    unsigned                 is_uthread:1; /* whether the current coroutine is
-                                              a user thread */
+    unsigned is_uthread:1; /* whether the current coroutine is a user thread */
 
-    unsigned                 thread_spawn_yielded:1; /* yielded from
-                                                        the ngx.thread.spawn()
-                                                        call */
-    unsigned                 sem_resume_status:1;
+    unsigned thread_spawn_yielded:1; /* yielded from the ngx.thread.spawn() call */
+    unsigned sem_resume_status:1;
 };
 
 /* 描述Lua虚拟机 */
@@ -426,16 +420,25 @@ typedef struct ngx_http_lua_ctx_s {
                                           每个请求对应一个新的虚拟机，以
                                           便于每次都重新加载脚本 */
     ngx_http_request_t *request;       /* 对应当前的HTTP请求 */
-    ngx_http_handler_pt resume_handler;/* 执行环境恢复句柄，=ngx_http_lua_wev_handler() */
+    ngx_http_handler_pt resume_handler;/* 执行环境恢复句柄，
+                                            内容处理阶段，待读取报文体=ngx_http_lua_read_body_resume()
+                                            非阻塞睡眠ngx.sleep()=ngx_http_lua_sleep_resume()
+                                            =ngx_http_lua_sema_resume()
+                                            =ngx_http_lua_on_abort_resume()
+                                            =ngx_http_lua_socket_tcp_conn_resume()
+                                            =ngx_http_lua_socket_tcp_read_resume()
+                                            =ngx_http_lua_socket_tcp_write_resume()
+                                            =ngx_http_lua_socket_udp_resume()
+                                            =ngx_http_lua_subrequest_resume() */
 
-    ngx_http_lua_co_ctx_t   *cur_co_ctx;      /* 当前协程的执行环境，初始化为&entry_co_ctx */
+    ngx_http_lua_co_ctx_t *cur_co_ctx; /* 当前协程的执行环境，初始化为&entry_co_ctx */
 
     /* FIXME: we should use rbtree here to prevent O(n) lookup overhead */
     ngx_list_t              *user_co_ctx;     /* coroutine contexts for user
                                                  coroutines */
 
-    ngx_http_lua_co_ctx_t    entry_co_ctx;    /* 入口协程执行环境，coroutine context for the
-                                                 entry coroutine */
+    ngx_http_lua_co_ctx_t entry_co_ctx;/* 入口协程执行环境，coroutine context 
+                                          for the entry coroutine */
 
     ngx_http_lua_co_ctx_t   *on_abort_co_ctx; /* coroutine context for the
                                                  on_abort thread */
@@ -476,8 +479,9 @@ typedef struct ngx_http_lua_ctx_s {
                                                     request */
 
     ngx_http_lua_posted_thread_t   *posted_threads;
+                        /* 待执行的协程列表 */
 
-    int                      uthreads; /* number of active user threads */
+    int  uthreads;      /* 活跃的子协程数，number of active user threads */
 
     uint16_t context;   /* 当前Lua代码块儿所处的指令环境，
                            如 NGX_HTTP_LUA_CONTEXT_CONTENT
@@ -489,10 +493,10 @@ typedef struct ngx_http_lua_ctx_s {
                                                        post_subrequest
                                                        (for subrequests only) */
 
-    unsigned                 waiting_more_body:1;   /* 1: 等待后续报文体
-                                                       0: 不许继续读取报文体，一般读取完毕后置位 */
+    unsigned  waiting_more_body:1; /* 1: 等待后续报文体
+                                      0: 不需读取报文体，一般读取完毕后置位 */
 
-    unsigned         co_op:2; /*  coroutine API operation */
+    unsigned  co_op:2;  /* NGX_HTTP_LUA_USER_CORO_NOP, coroutine API operation */
 
     unsigned         exited:1;
 
@@ -505,15 +509,15 @@ typedef struct ngx_http_lua_ctx_s {
                                      0: not to be captured */
 
 
-    unsigned         read_body_done:1;      /* 1: 请求报文体已经读取完毕
-                                               0: 请求体尚未读取完毕 */
+    unsigned  read_body_done:1;    /* 1: 请求报文体已经读取完毕
+                                      0: 请求体尚未读取完毕 */
 
     unsigned         headers_set:1; /* whether the user has set custom
                                        response headers */
 
     unsigned         entered_rewrite_phase:1;
     unsigned         entered_access_phase:1;
-    unsigned         entered_content_phase:1;       /* 进入内容处理阶段 */
+    unsigned         entered_content_phase:1; /* 是否已经进入内容处理阶段 */
 
     unsigned         buffering:1; /* HTTP 1.0 response body buffering flag */
 

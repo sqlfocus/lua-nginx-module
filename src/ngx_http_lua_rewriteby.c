@@ -38,8 +38,8 @@ ngx_http_lua_rewrite_handler(ngx_http_request_t *r)
                    "lua rewrite handler, uri:\"%V\" c:%ud", &r->uri,
                    r->main->count);
 
+    /* 移动到所有注册句柄的最后，也即Lua脚本最后执行 */
     lmcf = ngx_http_get_module_main_conf(r, ngx_http_lua_module);
-
     if (!lmcf->postponed_to_rewrite_phase_end) {
         ngx_http_core_main_conf_t       *cmcf;
         ngx_http_phase_handler_t        tmp;
@@ -78,16 +78,14 @@ ngx_http_lua_rewrite_handler(ngx_http_request_t *r)
     }
 
     llcf = ngx_http_get_module_loc_conf(r, ngx_http_lua_module);
-
     if (llcf->rewrite_handler == NULL) {
         dd("no rewrite handler found");
         return NGX_DECLINED;
     }
 
+    /* 创建协程环境 */
     ctx = ngx_http_get_module_ctx(r, ngx_http_lua_module);
-
     dd("ctx = %p", ctx);
-
     if (ctx == NULL) {
         ctx = ngx_http_lua_create_ctx(r);
         if (ctx == NULL) {
@@ -158,6 +156,7 @@ ngx_http_lua_rewrite_handler(ngx_http_request_t *r)
         }
     }
 
+    /* 执行，=ngx_http_lua_rewrite_handler_file() */
     dd("calling rewrite handler");
     return llcf->rewrite_handler(r);
 }
@@ -225,6 +224,7 @@ ngx_http_lua_rewrite_handler_file(ngx_http_request_t *r)
         return rc;
     }
 
+    /* 执行 */
     return ngx_http_lua_rewrite_by_chunk(L, r);
 }
 

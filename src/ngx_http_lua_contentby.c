@@ -47,7 +47,7 @@ ngx_http_lua_content_by_chunk(lua_State *L, ngx_http_request_t *r)
         dd("reset ctx");
         ngx_http_lua_reset_ctx(r, L, ctx);
     }
-    ctx->entered_content_phase = 1;           /* 设置进入内容处理阶段 */
+    ctx->entered_content_phase = 1;     /* 设置进入内容处理阶段 */
 
     /* 创建新协程，以便针对当前HTTP请求执行Lua脚本 */
     /*  {{{ new coroutine to handle request */
@@ -59,15 +59,15 @@ ngx_http_lua_content_by_chunk(lua_State *L, ngx_http_request_t *r)
         return NGX_HTTP_INTERNAL_SERVER_ERROR;
     }
 
-    /*  调用ngx_http_lua_content_by_chunk()时，栈顶元素为编译完毕的代码块儿；
-        此处的操作为，移动此代码块儿到新建的协程中 */
+    /* 调用ngx_http_lua_content_by_chunk()时，栈顶元素为编译完毕的代码块儿；
+       此处的操作为，移动此代码块儿到新建的协程中 */
     lua_xmove(L, co, 1);
 
-    /*  设置代码块儿的执行环境为，新建协程的全局表 */
+    /* 设置代码块儿的执行环境为，新建协程的全局表 */
     ngx_http_lua_get_globals_table(co);
-    lua_setfenv(co, -2);      /* 副作用：弹出了栈顶的全局表 */
+    lua_setfenv(co, -2);
     
-    /*  记录对应的请求指针，到变量_G["__ngx_req"] */
+    /* 记录对应的请求指针，到当前协程的全局变量_G["__ngx_req"] */
     ngx_http_lua_set_req(co, r);
 
     /* 记录新建的协程栈，及其索引 */
@@ -93,6 +93,7 @@ ngx_http_lua_content_by_chunk(lua_State *L, ngx_http_request_t *r)
     }
     /*  }}} */
 
+    /* 设置Lua代码所处的执行阶段 */
     ctx->context = NGX_HTTP_LUA_CONTEXT_CONTENT;
 
     /* 已经进入内容处理，不再允许读新数据 */
@@ -121,16 +122,22 @@ ngx_http_lua_content_by_chunk(lua_State *L, ngx_http_request_t *r)
     }
 
     /* 启动协程，执行对应的代码块儿，返回值如下：
-           NGX_AGAIN:      I/O interruption: r->main->count intact
-           NGX_DONE:       I/O interruption: r->main->count already incremented by 1
-           NGX_ERROR:      error
-           >= 200          HTTP status code
+           NGX_AGAIN:  I/O interruption: r->main->count intact
+           NGX_DONE:   I/O interruption: r->main->count already incremented by 1
+           NGX_ERROR:  error
+           >= 200      HTTP status code
      */
     rc = ngx_http_lua_run_thread(L, r, ctx, 0);
     if (rc == NGX_ERROR || rc >= NGX_OK) {
         return rc;
     }
 
+    /* 执行其他协程
+         NGX_OK: 当前阶段处理OK，进入下一阶段
+         NGX_DECLINED: 当前回调不处理此情况，进入同阶段下一个回调
+         NGX_AGAIN: 当前处理所需资源不足，需等待依赖的事件发生
+         NGX_DONE: 当前处理结束，仍需等待进一步事件发生后再做处理
+         NGX_ERROR/...: 各种错误，需要进入异常处理  */
     if (rc == NGX_AGAIN) {
         return ngx_http_lua_content_run_posted_threads(L, r, ctx, 0);
     }
@@ -156,8 +163,8 @@ ngx_http_lua_content_wev_handler(ngx_http_request_t *r)
     (void) ctx->resume_handler(r);
 }
 
-/* nginx lua模块儿的内容处理阶段入口句柄，NGX_HTTP_CONTENT_PHASE；
-   主要职责是找到对应的Lua环境，并执行Lua环境指定的脚本或代码 */
+/* nginx lua模块儿的内容处理阶段入口句柄，NGX_HTTP_CONTENT_PHASE；主要职责
+   是找到对应的Lua环境，并执行Lua环境指定的脚本或代码；对应配置指令“content_by_lua_file xxx” */
 ngx_int_t
 ngx_http_lua_content_handler(ngx_http_request_t *r)
 {
@@ -188,18 +195,18 @@ ngx_http_lua_content_handler(ngx_http_request_t *r)
 
     dd("entered? %d", (int) ctx->entered_content_phase);
 
-    if (ctx->waiting_more_body) {
+    if (ctx->waiting_more_body) {     /* 等待更多的报文体 */
         return NGX_DONE;
     }
 
-    if (ctx->entered_content_phase) {
+    if (ctx->entered_content_phase) { /* 恢复协程，继续处理 */
         dd("calling wev handler");
-        rc = ctx->resume_handler(r);
+        rc = ctx->resume_handler(r);  /* maybe=ngx_http_lua_read_body_resume() */
         dd("wev handler returns %d", (int) rc);
         return rc;
     }
 
-    /* 对应配置指令lua_need_request_body，需要读取报文体 */
+    /* 对应配置指令"lua_need_request_body"，需要读取报文体 */
     if (llcf->force_read_body && !ctx->read_body_done) {
         r->request_body_in_single_buf = 1;
         r->request_body_in_persistent_file = 1;
@@ -217,7 +224,7 @@ ngx_http_lua_content_handler(ngx_http_request_t *r)
         }
 
         if (rc == NGX_AGAIN) {
-            ctx->waiting_more_body = 1;     /* 需要等待后续报文 */
+            ctx->waiting_more_body = 1; /* 需要等待后续报文 */
 
             return NGX_DONE;
         }
@@ -225,13 +232,12 @@ ngx_http_lua_content_handler(ngx_http_request_t *r)
 
     dd("setting entered");
 
-    /* 设置标识，进入内容处理阶段 */
+    /* 设置标识，进入内容处理阶段；后续通过恢复协程加速进入处理 */
     ctx->entered_content_phase = 1;
 
-    /* 调用对应的Lua环境的处理句柄，ngx_http_lua_content_handler_inline()
-       或ngx_http_lua_content_handler_file()； =ngx_command_t->post */
+    /* 调用配置指令“content_by_lua_file”对应的处理函数 */
     dd("calling content handler");
-    return llcf->content_handler(r);
+    return llcf->content_handler(r);    /* =ngx_http_lua_content_handler_file() */
 }
 
 
@@ -254,7 +260,7 @@ ngx_http_lua_content_phase_post_read(ngx_http_request_t *r)
     }
 }
 
-/* 对应配置指令content_by_lua_file的Lua环境执行入口 */
+/* 对应配置指令"content_by_lua_file"的Lua环境执行入口 */
 ngx_int_t
 ngx_http_lua_content_handler_file(ngx_http_request_t *r)
 {
@@ -264,7 +270,7 @@ ngx_http_lua_content_handler_file(ngx_http_request_t *r)
     ngx_http_lua_loc_conf_t         *llcf;
     ngx_str_t                        eval_src;
 
-    /* 获取location对应的Lua配置信息，其中包括文件名 */
+    /* 获取location对应的Lua配置信息，如Lua脚本名 */
     llcf = ngx_http_get_module_loc_conf(r, ngx_http_lua_module);
     if (ngx_http_complex_value(r, &llcf->content_src, &eval_src) != NGX_OK) {
         return NGX_ERROR;
@@ -278,10 +284,10 @@ ngx_http_lua_content_handler_file(ngx_http_request_t *r)
         return NGX_ERROR;
     }
 
-    /* 获取Lua执行环境 */
+    /* 获取Lua虚拟机 */
     L = ngx_http_lua_get_lua_vm(r, NULL);
 
-    /*  加载对应的Lua脚本文件，load Lua script file (w/ cache)  sp = 1 */
+    /* 加载对应的Lua脚本文件，load Lua script file (w/ cache)  sp = 1 */
     rc = ngx_http_lua_cache_loadfile(r->connection->log, L, script_path,
                                      llcf->content_src_key);
     if (rc != NGX_OK) {
@@ -336,6 +342,7 @@ ngx_http_lua_content_run_posted_threads(lua_State *L, ngx_http_request_t *r,
 
     dd("run posted threads: %p", ctx->posted_threads);
 
+    /* 执行剩余的协程 */
     for ( ;; ) {
         pt = ctx->posted_threads;
         if (pt == NULL) {
@@ -355,6 +362,7 @@ ngx_http_lua_content_run_posted_threads(lua_State *L, ngx_http_request_t *r,
 
         ctx->cur_co_ctx = pt->co_ctx;
 
+        /* 执行 */
         rc = ngx_http_lua_run_thread(L, r, ctx, 0);
 
         if (rc == NGX_AGAIN) {

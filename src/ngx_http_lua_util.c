@@ -69,10 +69,10 @@
 #endif
 
 /* 全局注册表 */
-char ngx_http_lua_code_cache_key;        /**/
+char ngx_http_lua_code_cache_key;        /* 表，缓存Lua脚本代码，以加速执行效率 */
 char ngx_http_lua_regex_cache_key;       /**/
 char ngx_http_lua_socket_pool_key;       /**/
-char ngx_http_lua_coroutines_key;        /**/
+char ngx_http_lua_coroutines_key;        /* 表，记录“执行Lua脚本的协程” */
 char ngx_http_lua_headers_metatable_key; /**/
 
 
@@ -188,8 +188,7 @@ ngx_http_lua_create_new_globals_table(lua_State *L, int narr, int nrec)
 {
     lua_createtable(L, narr, nrec + 1);   /* 创建特定大小的表，并放置到栈顶 */
     lua_pushvalue(L, -1);                 /* 复制新建表，放置到栈顶(实际内存未复制，应该只复制了地址) */
-    lua_setfield(L, -2, "_G");            /* 新建表["_G"] = 复制表；并且复制表
-                                             从栈上弹出 */
+    lua_setfield(L, -2, "_G");            /* 新建表["_G"] = 新建表 */
 }
 
 /* 创建Lua虚拟机实例 */
@@ -350,11 +349,12 @@ ngx_http_lua_new_thread(ngx_http_request_t *r, lua_State *L, int *ref)
      *  for print() function will try to find tostring() in current
      *  globals table.
      */
-    /*  为新建线程创建新全局空表，其中["_G"]指向自身 */
+    /* 为新建线程创建新全局空表，其中["_G"]指向自身 */
     ngx_http_lua_create_new_globals_table(co, 0, 0);
     
-    /* 新建表，做为上述表到元表，并且其["__index"]为全局变量表(索引
-       为LUA_GLOBALSINDEX)，此全局表应该是参数L对应的虚拟机的全局表 */
+    /* 新建表，做为上述表的元表，并且其["__index"]为当前协程的全局变量表(索
+       引为LUA_GLOBALSINDEX)，注意此全局变量表也即外层L的全局变量表(后续将
+       被替换) */
     lua_createtable(co, 0, 1);
     ngx_http_lua_get_globals_table(co);
     lua_setfield(co, -2, "__index");
@@ -363,25 +363,27 @@ ngx_http_lua_new_thread(ngx_http_request_t *r, lua_State *L, int *ref)
     /* 由于lua_setmetatable()/lua_setfield()都涉及到弹出栈顶元素；因此
        此时栈顶为ngx_http_lua_create_new_globals_table()新建的表；把它
        设置为此新建线程的全局表(索引LUA_GLOBALSINDEX) */
-    ngx_http_lua_set_globals_table(co);     /* 伴有弹出栈顶操作 */
+    ngx_http_lua_set_globals_table(co);
+    /* <TAKECARE!!!>此函数执行完毕后，其全局表(索引LUA_GLOBALSINDEX)为新建
+                    表，其[_G]指向自身；其元表也为新建表，元表[__index]指
+                    向父协程(即L)的全局表 */
     /*  }}} */
 
     /* 在L栈索引为-2的表中创建栈顶元素的索引
           -2为全局注册表中键“&ngx_http_lua_coroutines_key”对应的表
           栈顶为新创建的协程结构
-       因此，结果是在L全局注册表对应特定键的表中，添加了新创建协程的索引
-    */
+       因此，结果是在L全局注册表对应特定键的表中，添加了新创建协程的索引 */
     *ref = luaL_ref(L, -2);     
     if (*ref == LUA_NOREF) {
         lua_settop(L, base);  /* restore main thread stack */
         return NULL;
     }
 
-    lua_settop(L, base);        /* 恢复L的栈 */
+    lua_settop(L, base);      /* 恢复L的栈 */
     return co;
 }
 
-
+/* 从全局注册表删除，从此此协程不可以再索引 */
 void
 ngx_http_lua_del_thread(ngx_http_request_t *r, lua_State *L,
     ngx_http_lua_ctx_t *ctx, ngx_http_lua_co_ctx_t *coctx)
@@ -1117,7 +1119,7 @@ ngx_http_lua_run_thread(lua_State *L, ngx_http_request_t *r,
                 dd("top elem: %s", luaL_typename(orig_coctx->co, -1));
             }
 #endif
-
+            /* 检查堆栈栈顶，和resume前是否一致 */
             ngx_http_lua_assert(orig_coctx->co_top + nrets
                                 == lua_gettop(orig_coctx->co));
 
@@ -1147,6 +1149,7 @@ ngx_http_lua_run_thread(lua_State *L, ngx_http_request_t *r,
                   让出CPU，后续利用事件驱动的方式通知并重启此协程
                2) 对于0, 表示处理结束 */
             switch (rv) {
+            /*** 遇到阻塞事件 ***/                
             case LUA_YIELD:          
                 /*  yielded, let event handler do the rest job */
                 /*  FIXME: add io cmd dispatcher here */
@@ -1292,16 +1295,17 @@ ngx_http_lua_run_thread(lua_State *L, ngx_http_request_t *r,
 
                 /* try resuming on the new coroutine again */
                 continue;
-
+                
+            /*** 执行完毕 ***/
             case 0:
 
                 ngx_http_lua_cleanup_pending_operation(ctx->cur_co_ctx);
-
                 ngx_http_lua_probe_coroutine_done(r, ctx->cur_co_ctx->co, 1);
 
                 /* 设置协程状态，ngx_http_lua_co_status_t，表示已完成任务 */
                 ctx->cur_co_ctx->co_status = NGX_HTTP_LUA_CO_DEAD;
 
+                /* 清理僵尸子协程 */
                 if (ctx->cur_co_ctx->zombie_child_threads) {
                     ngx_http_lua_cleanup_zombie_child_uthreads(r, L, ctx,
                                                                ctx->cur_co_ctx);
@@ -1310,16 +1314,14 @@ ngx_http_lua_run_thread(lua_State *L, ngx_http_request_t *r,
                 ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                                "lua light thread ended normally");
 
+                /* 角色主协程，即入口协程，从全局注册表清理 */
                 if (ngx_http_lua_is_entry_thread(ctx)) {
-
                     lua_settop(L, 0);
 
-                    ngx_http_lua_del_thread(r, L, ctx, ctx->cur_co_ctx);
+                    ngx_http_lua_del_thread(r, L, ctx, ctx->cur_co_ctx); /* 清理全局注册表 */
 
                     dd("uthreads: %d", (int) ctx->uthreads);
-
-                    if (ctx->uthreads) {
-
+                    if (ctx->uthreads) {                                 /* 尚有活跃的子协程 */
                         ctx->cur_co_ctx = NULL;
                         return NGX_AGAIN;
                     }
@@ -1327,41 +1329,40 @@ ngx_http_lua_run_thread(lua_State *L, ngx_http_request_t *r,
                     /* all user threads terminated already */
                     goto done;
                 }
-
+                
+                /* 角色子协程，即cosocket对应的协程 */
                 if (ctx->cur_co_ctx->is_uthread) {
                     /* being a user thread */
-
                     lua_settop(L, 0);
 
                     parent_coctx = ctx->cur_co_ctx->parent_co_ctx;
-
+                    /* 父协程存活 */
                     if (ngx_http_lua_coroutine_alive(parent_coctx)) {
                         if (ctx->cur_co_ctx->waited_by_parent) {
                             ngx_http_lua_probe_info("parent already waiting");
                             ctx->cur_co_ctx->waited_by_parent = 0;
-                            success = 1;
+                            success = 1;      /* 类似于wait() */
                             goto user_co_done;
                         }
 
                         ngx_http_lua_probe_info("parent still alive");
-
                         if (ngx_http_lua_post_zombie_thread(r, parent_coctx,
                                                             ctx->cur_co_ctx)
-                            != NGX_OK)
+                            != NGX_OK)        /* 加入父协程的->zombie_child_threads 链表 */
                         {
                             return NGX_ERROR;
                         }
-
+                                              /* 压栈返回值，待父协程处理 */
                         lua_pushboolean(ctx->cur_co_ctx->co, 1);
-                        lua_insert(ctx->cur_co_ctx->co, 1);
-
+                        lua_insert(ctx->cur_co_ctx->co, 1);   /* 压栈的bool值移动到索引为1处 */
+                                              /* 设置为僵尸子协程 */
                         ctx->cur_co_ctx->co_status = NGX_HTTP_LUA_CO_ZOMBIE;
                         ctx->cur_co_ctx = NULL;
                         return NGX_AGAIN;
                     }
-
+                    /* 父协程未存活，提前结束任务 */
                     ngx_http_lua_del_thread(r, L, ctx, ctx->cur_co_ctx);
-                    ctx->uthreads--;
+                    ctx->uthreads--;          /* 减少活跃子协程数 */
 
                     if (ctx->uthreads == 0) {
                         if (ngx_http_lua_entry_thread_alive(ctx)) {
@@ -1379,11 +1380,9 @@ ngx_http_lua_run_thread(lua_State *L, ngx_http_request_t *r,
                 }
 
                 /* being a user coroutine that has a parent */
-
                 success = 1;
 
 user_co_done:
-
                 nrets = lua_gettop(ctx->cur_co_ctx->co);
 
                 next_coctx = ctx->cur_co_ctx->parent_co_ctx;
@@ -1399,8 +1398,8 @@ user_co_done:
                  * ended successful, coroutine.resume returns true plus
                  * any return values
                  */
+                /* 子协程的返回值压入父协程栈 */
                 lua_pushboolean(next_co, success);
-
                 if (nrets) {
                     lua_xmove(ctx->cur_co_ctx->co, next_co, nrets);
                 }
@@ -1410,18 +1409,19 @@ user_co_done:
                     ctx->uthreads--;
                 }
 
+                /* 指向父协程 */
                 nrets++;
                 ctx->cur_co_ctx = next_coctx;
 
                 ngx_http_lua_probe_info("set parent running");
 
+                /* 设置父协程运行 */
                 next_coctx->co_status = NGX_HTTP_LUA_CO_RUNNING;
 
                 ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                                "lua coroutine: lua user thread ended normally");
-
                 continue;
-
+            /*** 其他错误 ***/
             case LUA_ERRRUN:
                 err = "runtime error";
                 break;
@@ -1457,7 +1457,6 @@ user_co_done:
             }
 
             ngx_http_lua_cleanup_pending_operation(ctx->cur_co_ctx);
-
             ngx_http_lua_probe_coroutine_done(r, ctx->cur_co_ctx->co, 0);
 
             ctx->cur_co_ctx->co_status = NGX_HTTP_LUA_CO_DEAD;
@@ -1571,8 +1570,9 @@ user_co_done:
             /* try resuming on the new coroutine again */
             continue;
         }
-
-    } NGX_LUA_EXCEPTION_CATCH {
+    }
+    /* <TAKECARE!!!>发生panic后，跳转至此，仅仅打印日志，然后退出 */
+    NGX_LUA_EXCEPTION_CATCH {
         dd("nginx execution restored");
     }
 

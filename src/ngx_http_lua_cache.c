@@ -229,7 +229,7 @@ ngx_http_lua_cache_loadfile(ngx_log_t *log, lua_State *L,
 
     dd("XXX cache key for file: [%s]", cache_key);
 
-    /* 优先加载缓存的编译结果 */
+    /* 如果代码块儿已经缓存，则获取 */
     rc = ngx_http_lua_cache_load_code(log, L, (char *) cache_key);
     if (rc == NGX_OK) {
         /*  code chunk loaded from cache, sp++ */

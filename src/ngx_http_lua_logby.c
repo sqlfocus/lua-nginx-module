@@ -93,7 +93,7 @@ ngx_http_lua_log_handler(ngx_http_request_t *r)
     }
 
     ctx->context = NGX_HTTP_LUA_CONTEXT_LOG;
-
+    /* 执行，=ngx_http_lua_log_handler_file() */
     dd("calling log handler");
     return llcf->log_handler(r);
 }

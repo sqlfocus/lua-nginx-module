@@ -158,7 +158,7 @@ ngx_http_lua_access_handler(ngx_http_request_t *r)
             return NGX_DONE;
         }
     }
-
+    /* 执行，=ngx_http_lua_access_handler_file() */
     dd("calling access handler");
     return llcf->access_handler(r);
 }
