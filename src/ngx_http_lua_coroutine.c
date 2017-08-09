@@ -251,7 +251,8 @@ ngx_http_lua_inject_coroutine_api(ngx_log_t *log, lua_State *L)
     /* get old coroutine table */
     lua_getglobal(L, "coroutine");
 
-    /* set running to the old one */
+    /* 除coroutine.running()外，原Lua库的协程函数都被替换了，老函数以_起始
+       set running to the old one */
     lua_getfield(L, -1, "running");
     lua_setfield(L, -3, "running");
 
@@ -270,6 +271,7 @@ ngx_http_lua_inject_coroutine_api(ngx_log_t *log, lua_State *L)
     /* pop the old coroutine */
     lua_pop(L, 1);
 
+    /* 注册自定义函数，不过以__开头 */
     lua_pushcfunction(L, ngx_http_lua_coroutine_create);
     lua_setfield(L, -2, "__create");
 
@@ -282,9 +284,11 @@ ngx_http_lua_inject_coroutine_api(ngx_log_t *log, lua_State *L)
     lua_pushcfunction(L, ngx_http_lua_coroutine_status);
     lua_setfield(L, -2, "__status");
 
+    /* 更新全局表coroutine */
     lua_setglobal(L, "coroutine");
 
-    /* inject coroutine APIs */
+    /* 创建包装函数，使得coroutine.xxx可以在自定义和系统函数之间灵活切换
+       inject coroutine APIs */
     {
         const char buf[] =
             "local keys = {'create', 'yield', 'resume', 'status'}\n"
@@ -324,7 +328,6 @@ ngx_http_lua_inject_coroutine_api(ngx_log_t *log, lua_State *L)
         ngx_log_error(NGX_LOG_ERR, log, 0,
                       "failed to load Lua code for coroutine.wrap(): %i: %s",
                       rc, lua_tostring(L, -1));
-
         lua_pop(L, 1);
         return;
     }

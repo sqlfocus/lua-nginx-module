@@ -146,23 +146,23 @@ typedef struct {
     lua_CFunction        loader;
 } ngx_http_lua_preload_hook_t;
 
-/* lua nginx模块儿主环境 */
+/* lua nginx模块儿主环境配置，即http{}层级配置 */
 struct ngx_http_lua_main_conf_s {
-    lua_State           *lua;        /* lua引擎栈 */
+    lua_State *lua;        /* lua引擎栈 */
 
-    ngx_str_t            lua_path;   /* 对应Lua_package_path，lua脚本搜索路径 */
-    ngx_str_t            lua_cpath;  /* 对应Lua_package_cpath，lua c模块儿搜索路径 */
+    ngx_str_t  lua_path;   /* 对应配置指令“Lua_package_path”，lua脚本搜索路径 */
+    ngx_str_t  lua_cpath;  /* 对应配置指令“Lua_package_cpath”，lua c模块儿搜索路径 */
 
-    ngx_cycle_t         *cycle;
-    ngx_pool_t          *pool;
+    ngx_cycle_t *cycle;
+    ngx_pool_t  *pool;
 
-    ngx_int_t            max_pending_timers;
-    ngx_int_t            pending_timers;
+    ngx_int_t  max_pending_timers;  /* 最大的悬挂定时器数，“lua_max_pending_timers 1024” */
+    ngx_int_t  pending_timers;      /* Pending timers are those timers that have not expired yet*/
 
-    ngx_int_t            max_running_timers;
-    ngx_int_t            running_timers;
+    ngx_int_t  max_running_timers;  /* 允许的最大并行定时器数量，"lua_max_running_timers 256" */
+    ngx_int_t  running_timers;      /* Running timers are those timers whose user callback functions are still running */
 
-    ngx_connection_t    *watcher;    /* for watching the process exit event */
+    ngx_connection_t    *watcher;   /* for watching the process exit event */
 
 #if (NGX_PCRE)
     ngx_int_t            regex_cache_entries;
@@ -170,20 +170,33 @@ struct ngx_http_lua_main_conf_s {
     ngx_int_t            regex_match_limit;
 #endif
 
-    ngx_array_t         *shm_zones;     /* 通过配置指令lua_shared_dict申请的
-                                           共享内存描述结构指针，ngx_shm_zone_t* */
+#if 0
+struct ngx_shm_zone_s {
+    void  *data;        /* 对应的模块儿信息，如 ngx_http_lua_shdict_ctx_t */
+    ngx_shm_t shm;      /* 详细描述信息 */
+    ngx_shm_zone_init_pt init; /* 初始回调函数，如 ngx_http_lua_shdict_init_zone() */
+    void *tag;          /* 标签，一般为模块儿地址信息，区分共享内存的用途；
+                              防止不同模块儿创建同名称的共享内存，造成逻辑混乱
+                              ngx_http_lua_module */
+    ngx_uint_t noreuse; /* unsigned  noreuse:1; 是否可重用? 可重用的情况
+                              下，在reload处理时，没有变化的共享内存不必再重
+                              新分配，仅仅重新初始化就ok */
+};
+#endif
+    ngx_array_t *shm_zones;/* 通过配置指令lua_shared_dict申请的
+                              共享内存描述结构指针数组, ngx_shm_zone_t* */
 
-    ngx_array_t         *preload_hooks; /* of ngx_http_lua_preload_hook_t */
+    ngx_array_t *preload_hooks; /* of ngx_http_lua_preload_hook_t */
 
-    ngx_flag_t           postponed_to_rewrite_phase_end;
-    ngx_flag_t           postponed_to_access_phase_end;
+    ngx_flag_t  postponed_to_rewrite_phase_end;
+    ngx_flag_t  postponed_to_access_phase_end;
 
     ngx_http_lua_main_conf_handler_pt    init_handler;
-    ngx_str_t                            init_src;
+    ngx_str_t init_src;       /* 对应配置指令“init_by_lua_file”, ngx_http_lua_init_by_file() */
 
-    ngx_http_lua_main_conf_handler_pt    init_worker_handler;
-    ngx_str_t                            init_worker_src;
-
+    ngx_http_lua_main_conf_handler_pt init_worker_handler;
+    ngx_str_t init_worker_src;/* 对应配置指令“init_worker_by_lua_file”, ngx_http_lua_init_worker_by_file() */
+ 
     ngx_http_lua_balancer_peer_data_t      *balancer_peer_data;
                     /* balancer_by_lua does not support yielding and
                      * there cannot be any conflicts among concurrent requests,
@@ -205,54 +218,54 @@ struct ngx_http_lua_main_conf_s {
 
 
 union ngx_http_lua_srv_conf_u {
+    /* http{server{}}层级, 控制downstream SSL链路 */
 #if (NGX_HTTP_SSL)
     struct {
         ngx_http_lua_srv_conf_handler_pt     ssl_cert_handler;
-        ngx_str_t                            ssl_cert_src;
-        u_char                              *ssl_cert_src_key;
+        ngx_str_t ssl_cert_src;       /* "ssl_certificate_by_lua_file" */
+        u_char *ssl_cert_src_key;     /* ngx_http_lua_ssl_cert_handler_file() */
 
         ngx_http_lua_srv_conf_handler_pt     ssl_sess_store_handler;
-        ngx_str_t                            ssl_sess_store_src;
-        u_char                              *ssl_sess_store_src_key;
+        ngx_str_t ssl_sess_store_src;  /* "ssl_session_store_by_lua_file" */
+        u_char *ssl_sess_store_src_key;/* ngx_http_lua_ssl_sess_store_handler_file() */
 
         ngx_http_lua_srv_conf_handler_pt     ssl_sess_fetch_handler;
-        ngx_str_t                            ssl_sess_fetch_src;
-        u_char                              *ssl_sess_fetch_src_key;
+        ngx_str_t ssl_sess_fetch_src;  /* "ssl_session_fetch_by_lua_file" */
+        u_char *ssl_sess_fetch_src_key;/* ngx_http_lua_ssl_sess_fetch_handler_file() */
     } srv;
 #endif
-
+    
+    /* http{upstream{}}层级，对应配置指令“balancer_by_lua_file” */
     struct {
-        ngx_str_t           src;
-        u_char             *src_key;
-
-        ngx_http_lua_srv_conf_handler_pt  handler;
+        ngx_str_t           src;                   /* 脚本文件名 */
+        u_char             *src_key;               /* "nhli_" + md5(->src) */
+        ngx_http_lua_srv_conf_handler_pt  handler; /* ngx_http_lua_balancer_handler_file() */
     } balancer;
 };
 
 /* lua nginx模块儿location环境 */
 typedef struct {
 #if (NGX_HTTP_SSL)
-    ngx_ssl_t              *ssl;  /* shared by SSL cosockets */
-    ngx_uint_t              ssl_protocols;
-    ngx_str_t               ssl_ciphers;
-    ngx_uint_t              ssl_verify_depth;
-    ngx_str_t               ssl_trusted_certificate;
-    ngx_str_t               ssl_crl;
+    ngx_ssl_t  *ssl;  /* SSL环境，用于cosocket主动发起SSL连接，做为客户端，shared by SSL cosockets */
+    ngx_uint_t ssl_protocols;           /* "lua_ssl_protocols SSLv3 TLS1.2", 参考 ngx_http_lua_ssl_protocols[] */
+    ngx_str_t  ssl_ciphers;             /* "lua_ssl_ciphers DEFAULT" */
+    ngx_uint_t ssl_verify_depth;        /* "lua_ssl_verify_depth 1" */
+    ngx_str_t  ssl_trusted_certificate; /* "lua_ssl_trusted_certificate <file>" */
+    ngx_str_t  ssl_crl;                 /* "lua_ssl_crl <file>" */
 #endif
 
-    ngx_flag_t              force_read_body;   /* 对应配置lua_need_request_body，
-                                                是否强制读取请求体 */
-    ngx_flag_t              enable_code_cache; /* 对应配置lua_code_cache，是否
-                                                  使能code cache */
+    ngx_flag_t force_read_body;    /* 对应配置lua_need_request_body，是否强制读取请求体; 
+                                      推荐使用ngx.req.read_body()/ngx.req.discard_body(), 更灵活 */
+    ngx_flag_t  enable_code_cache; /* 对应配置指令“lua_code_cache on/off”，是否使能code cache */
     ngx_flag_t              http10_buffering;
 
-    ngx_http_handler_pt     rewrite_handler;
-    ngx_http_handler_pt     access_handler;
-    ngx_http_handler_pt     content_handler;   /* 处理句柄，对应ngx_http_lua_content_handler_inline() */
-    ngx_http_handler_pt     log_handler;
-    ngx_http_handler_pt     header_filter_handler;
-
-    ngx_http_output_body_filter_pt         body_filter_handler;
+    /* 各阶段处理句柄，对应rewrite/access/content/log/header_filter/body_filter_by_lua_file */
+    ngx_http_handler_pt rewrite_handler;       /* ngx_http_lua_rewrite_handler_file() */
+    ngx_http_handler_pt access_handler;        /* ngx_http_lua_access_handler_file() */
+    ngx_http_handler_pt content_handler;       /* ngx_http_lua_content_handler_file() */
+    ngx_http_handler_pt log_handler;           /* ngx_http_lua_log_handler_file() */
+    ngx_http_handler_pt header_filter_handler; /* ngx_http_lua_header_filter_file() */
+    ngx_http_output_body_filter_pt body_filter_handler; /* ngx_http_lua_body_filter_file() */
 
     u_char                  *rewrite_chunkname;
     ngx_http_complex_value_t rewrite_src;    /*  rewrite_by_lua
@@ -291,21 +304,21 @@ typedef struct {
     ngx_http_complex_value_t         body_filter_src;
     u_char                          *body_filter_src_key;
 
-    ngx_msec_t                       keepalive_timeout;
-    ngx_msec_t                       connect_timeout;
-    ngx_msec_t                       send_timeout;
-    ngx_msec_t                       read_timeout;
+    ngx_msec_t keepalive_timeout; /* "lua_socket_keepalive_timeout" */
+    ngx_msec_t connect_timeout;   /* "lua_socket_connect_timeout" */
+    ngx_msec_t send_timeout;      /* "lua_socket_send_timeout" */
+    ngx_msec_t read_timeout;      /* "lua_socket_read_timeout" */
 
-    size_t                           send_lowat;
-    size_t                           buffer_size;
+    size_t     send_lowat;        /* "lua_socket_send_lowat" */
+    size_t     buffer_size;       /* "lua_socket_buffer_size" */
 
-    ngx_uint_t                       pool_size;
+    ngx_uint_t pool_size;         /* "lua_socket_pool_size" */
 
-    ngx_flag_t                       transform_underscores_in_resp_headers;
-    ngx_flag_t                       log_socket_errors;
-    /* 对应配置lua_check_client_abort，检查client是否关闭连接 */
-    ngx_flag_t                       check_client_abort;
-    ngx_flag_t                       use_default_type;
+    ngx_flag_t transform_underscores_in_resp_headers;
+    ngx_flag_t log_socket_errors;
+
+    ngx_flag_t check_client_abort;/* "lua_check_client_abort", 检查client是否关闭连接 */
+    ngx_flag_t use_default_type;  /* "lua_use_default_type" */
 } ngx_http_lua_loc_conf_t;
 
 
@@ -409,12 +422,11 @@ typedef struct {
 
 /* Lua的执行环境，是沟通起nginx的C环境和Lua环境的桥梁 */
 typedef struct ngx_http_lua_ctx_s {
-    ngx_http_lua_vm_state_t  *vm_state;       /* 对应配置指令lua_coce_cache off
-                                                 每个请求对应一个新的虚拟机，以
-                                                 便于每次都重新加载脚本 */
-    ngx_http_request_t      *request;         /* 对应当前的HTTP请求 */
-    ngx_http_handler_pt      resume_handler;  /* 执行环境恢复句柄，赋值
-                                                 为ngx_http_lua_wev_handler */
+    ngx_http_lua_vm_state_t *vm_state; /* 对应配置指令lua_coce_cache off
+                                          每个请求对应一个新的虚拟机，以
+                                          便于每次都重新加载脚本 */
+    ngx_http_request_t *request;       /* 对应当前的HTTP请求 */
+    ngx_http_handler_pt resume_handler;/* 执行环境恢复句柄，=ngx_http_lua_wev_handler() */
 
     ngx_http_lua_co_ctx_t   *cur_co_ctx;      /* 当前协程的执行环境，初始化为&entry_co_ctx */
 
@@ -467,12 +479,11 @@ typedef struct ngx_http_lua_ctx_s {
 
     int                      uthreads; /* number of active user threads */
 
-    uint16_t                 context;   /* 当前代码块儿所处的指令环境，
-                                           如NGX_HTTP_LUA_CONTEXT_CONTENT
+    uint16_t context;   /* 当前Lua代码块儿所处的指令环境，
+                           如 NGX_HTTP_LUA_CONTEXT_CONTENT
 
-                                           the current running directive context
-                                           (or running phase) for the current
-                                           Lua chunk */
+                           the current running directive context
+                           (or running phase) for the current Lua chunk */
 
     unsigned                 run_post_subrequest:1; /* whether it has run
                                                        post_subrequest

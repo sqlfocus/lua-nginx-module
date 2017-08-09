@@ -68,16 +68,16 @@
 #define NGX_HTTP_LUA_BT_MAX_COROS  5
 #endif
 
+/* 全局注册表 */
+char ngx_http_lua_code_cache_key;        /**/
+char ngx_http_lua_regex_cache_key;       /**/
+char ngx_http_lua_socket_pool_key;       /**/
+char ngx_http_lua_coroutines_key;        /**/
+char ngx_http_lua_headers_metatable_key; /**/
 
-char ngx_http_lua_code_cache_key;
-char ngx_http_lua_regex_cache_key;
-char ngx_http_lua_socket_pool_key;
-char ngx_http_lua_coroutines_key;
-char ngx_http_lua_headers_metatable_key;
 
-
-ngx_uint_t  ngx_http_lua_location_hash = 0;
-ngx_uint_t  ngx_http_lua_content_length_hash = 0;
+ngx_uint_t  ngx_http_lua_location_hash = 0;       /**/
+ngx_uint_t  ngx_http_lua_content_length_hash = 0; /**/
 
 
 static ngx_int_t ngx_http_lua_send_http10_headers(ngx_http_request_t *r,
@@ -208,43 +208,43 @@ ngx_http_lua_new_state(lua_State *parent_vm, ngx_cycle_t *cycle,
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, log, 0, "lua creating new vm state");
 
     /* 创建Lua虚拟机 */
-    L = luaL_newstate();         /* 创建虚拟机执行的栈空间 */
+    L = luaL_newstate();
     if (L == NULL) {
         return NULL;
     }
 
-    luaL_openlibs(L);            /* 在虚拟机栈中，打开标准lua库 */
+    /* 打开标准lua库 */
+    luaL_openlibs(L);
 
-    /* 引入package全局库 */
-    lua_getglobal(L, "package"); /* 在栈中压入字符串全局变量package，即引入
-                                    标准库package的表，以利用require()等 */
-    if (!lua_istable(L, -1)) {   /* lua用索引引用栈中的元素，第一个压入栈的
-                                    元素索引为1, 第二个为2, 依次类推直到栈顶；
-                                    如果以栈顶为参照，则-1表示栈顶，-2表示
-                                    栈顶下的元素 */
+    /* 修改全局package库的搜索路径，对应配置指令“lua_package_path”、“lua_package_cpath”
+
+       <NOTE> The package library provides basic facilities for loading 
+              modules in Lua. It exports one function directly in the global 
+              environment: require. Everything else is exported in a table package.  */
+    lua_getglobal(L, "package");
+    if (!lua_istable(L, -1)) {
         ngx_log_error(NGX_LOG_EMERG, log, 0,
                       "the \"package\" table does not exist");
         return NULL;
     }
 
-    /* 初始化lua脚本、C库程序查找路径； 如果可能继承父环境的值 */
-    if (parent_vm) {
-        lua_getglobal(parent_vm, "package");      /* 压入父lua环境的package表 */
-        lua_getfield(parent_vm, -1, "path");      /* 压入package.path */
+    if (parent_vm) {               /* 存在父环境，则利用父环境初始化 */
+        lua_getglobal(parent_vm, "package");
+        lua_getfield(parent_vm, -1, "path");
         old_path = lua_tolstring(parent_vm, -1, &old_path_len);
-        lua_pop(parent_vm, 1);                    /* 转换成字符串 */
+        lua_pop(parent_vm, 1);
 
         lua_pushlstring(L, old_path, old_path_len);
-        lua_setfield(L, -2, "path");              /* 把转换后的字符串压栈，并赋值给当前虚拟机的package.path */
+        lua_setfield(L, -2, "path");
 
         lua_getfield(parent_vm, -1, "cpath");
         old_path = lua_tolstring(parent_vm, -1, &old_path_len);
         lua_pop(parent_vm, 2);
 
         lua_pushlstring(L, old_path, old_path_len);
-        lua_setfield(L, -2, "cpath");             /* 同理，赋值当前虚拟机的package.cpath */
+        lua_setfield(L, -2, "cpath");
 
-    } else {
+    } else {                       /* 不存在父环境，则利用“配置信息＋默认信息”初始化 */
 #ifdef LUA_DEFAULT_PATH
 #   define LUA_DEFAULT_PATH_LEN (sizeof(LUA_DEFAULT_PATH) - 1)
         ngx_log_debug1(NGX_LOG_DEBUG_HTTP, log, 0,
@@ -271,8 +271,6 @@ ngx_http_lua_new_state(lua_State *parent_vm, ngx_cycle_t *cycle,
         lua_setfield(L, -2, "cpath"); /* package */
 #endif
 
-        /* 如果父环境不存在，则利用配置文件指定的值初始化；配置文件中通过
-           lua_package_path/lua_package_cpath指定 */
         if (lmcf->lua_path.len != 0) {
             lua_getfield(L, -1, "path"); /* get original package.path */
             old_path = lua_tolstring(L, -1, &old_path_len);
@@ -306,10 +304,9 @@ ngx_http_lua_new_state(lua_State *parent_vm, ngx_cycle_t *cycle,
             lua_pop(L, 2);
         }
     }
+    lua_pop(L, 1);                /* 弹出标准库package表，恢复堆栈 */
 
-    lua_pop(L, 1);                /* 弹出标准库package的表 */
-
-    /* 初始化Lua的注册表，保存全局变量；用于保存模块儿间共享的数据 */
+    /* 初始化Lua的注册表，用于保存模块儿间共享的数据, 键值 ngx_http_lua_code_cache_key */
     ngx_http_lua_init_registry(L, log);
 
     /* 暴露全局变量ndk、ngx、__ngx_cycle */
@@ -319,7 +316,7 @@ ngx_http_lua_new_state(lua_State *parent_vm, ngx_cycle_t *cycle,
 }
 
 /* 创建新协程，此协程继承了老Lua虚拟机环境L的全局变量，并创建了自己的
-   全局空表；并通过注册表项&ngx_http_lua_coroutines_key的协程记录表记录
+   全局空表；并通过注册表项 &ngx_http_lua_coroutines_key 的协程记录表记录
    到老Lua环境中 */
 lua_State *
 ngx_http_lua_new_thread(ngx_http_request_t *r, lua_State *L, int *ref)
@@ -691,9 +688,10 @@ send:
 /* 初始化注册表，存放全局变量的表，可用于保存模块儿间共享的数据
        只能被C代码访问
        位于虚拟索引LUA_REGISTRYINDEX上
-       key值需要谨慎选择，以避免冲突(可选择变量地址，有链接器保证唯一)
+       key值需要谨慎选择，以避免冲突(可选择变量地址，由链接器保证唯一)
 
    示例：保存字符串
+       const static char *key;
        lua_pushlightuserdata(L, (void*) &key);   压入地址
        lua_pushstring(L, mystr);                 压入值
        lua_settable(L, LUA_REGISTRYINDEX);       registry[&key] = mystr
@@ -713,8 +711,8 @@ ngx_http_lua_init_registry(lua_State *L, ngx_log_t *log)
      * {([int]ref) = [cort]} */
     /* 注册表：用于lua协程 */
     lua_pushlightuserdata(L, &ngx_http_lua_coroutines_key);
-    lua_createtable(L, 0, 32 /* nrec */);
-    lua_rawset(L, LUA_REGISTRYINDEX);
+    lua_createtable(L, 0/* narr */, 32 /* nrec */);
+    lua_rawset(L, LUA_REGISTRYINDEX);  /* 类似于lua_settable(), 但效率更高 */
     /* }}} */
 
     /* create the registry entry for the Lua request ctx data table */
@@ -754,7 +752,7 @@ ngx_http_lua_init_globals(lua_State *L, ngx_cycle_t *cycle,
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, log, 0,
                    "lua initializing lua globals");
     
-    /* 设置Lua全局变量__ngx_cycle */
+    /* 全局变量 __ngx_cycle, 指向当前的 ngx_cycle 配置*/
     lua_pushlightuserdata(L, cycle);
     lua_setglobal(L, "__ngx_cycle");
 
@@ -772,18 +770,19 @@ static void
 ngx_http_lua_inject_ngx_api(lua_State *L, ngx_http_lua_main_conf_t *lmcf,
     ngx_log_t *log)
 {
-    /* 此即ngx表，可通过ngx.xxx索引 */
+    /* 新建表，最后命名为ngx */
     lua_createtable(L, 0 /* narr */, 116 /* nrec */);    /* ngx.* */
 
-    /* 变量_phase_ctx，对应ngx_http_lua_module模块儿的配置结构体，ngx_http_lua_ctx_t */
+    /* ngx._phase_ctx，维护每请求的Lua代码块儿所处的阶段, ngx_http_lua_ctx_t->context */
     lua_pushcfunction(L, ngx_http_lua_get_raw_phase_context);
     lua_setfield(L, -2, "_phase_ctx");
 
     /* 初始化ngx.arg表 */
     ngx_http_lua_inject_arg_api(L);
 
-    /* 初始化ngx.HTTP_XXX变量 */
+    /* 初始化ngx.HTTP_GET/_xxx变量 */
     ngx_http_lua_inject_http_consts(L);
+    
     /* 初始化ngx.OK/AGAIN/DONE/DECLINED/ERROR/null */
     ngx_http_lua_inject_core_consts(L);
 
@@ -808,7 +807,7 @@ ngx_http_lua_inject_ngx_api(lua_State *L, ngx_http_lua_main_conf_t *lmcf,
     /* 注册睡眠等待函数，ngx.sleep() */
     ngx_http_lua_inject_sleep_api(L);
 
-    /* 注册阶段处理api，ngx.get_phase() */
+    /* 注册ngx.get_phase(), 获取当前Lua代码所处的执行阶段 */
     ngx_http_lua_inject_phase_api(L);
 
 #if (NGX_PCRE)
@@ -816,35 +815,36 @@ ngx_http_lua_inject_ngx_api(lua_State *L, ngx_http_lua_main_conf_t *lmcf,
     ngx_http_lua_inject_regex_api(L);
 #endif
 
-    /* 注册处理http请求相关的API，包括头部、body等 */
+    /* 注册表ngx.req, 以获取或设置http信息,  包括头部、body等 */
     ngx_http_lua_inject_req_api(log, L);
-    
+
+    /* 注册ngx.header/ngx.resp表 */
     ngx_http_lua_inject_resp_header_api(L);
     ngx_http_lua_create_headers_metatable(log, L);
 
-    /* 注册var相关变量，ngx.var.xxx */
+    /* 注册ngx.var表 */
     ngx_http_lua_inject_variable_api(L);
 
     /* 共享内存处理API，ngx.shared.DICT.xxx */
     ngx_http_lua_inject_shdict_api(lmcf, L);
 
-    /* 原生态插口API */
+    /* 原生态插口API，ngx.socket */
     ngx_http_lua_inject_socket_tcp_api(log, L);
     ngx_http_lua_inject_socket_udp_api(log, L);
 
-    /* 用户态线程API */
+    /* 注册ngx.thread表 */
     ngx_http_lua_inject_uthread_api(log, L);
 
-    /* 定时器，ngx.timer.at()/... */
+    /* 注册ngx.timer表，定时器相关操作 */
     ngx_http_lua_inject_timer_api(L);
 
-    /* 配置信息，如版本信息等 */
+    /* 注册ngx.config表，以获取配置信息等 */
     ngx_http_lua_inject_config_api(L);
 
-    /* worker进程信息，ngx.worker.xxx */
+    /* 注册ngx.worker表，以获取worker进程信息 */
     ngx_http_lua_inject_worker_api(L);
 
-    /* ngx.getter/setter() */
+    /* 初始化ngx的metadata表，提供其他变量的获取、添加功能，如ngx.ctx/ngx.status */
     ngx_http_lua_inject_misc_api(L);
 
     /* 加载ngx，设置package.loaded["ngx"] = {刚刚初始化的表} */
@@ -854,10 +854,10 @@ ngx_http_lua_inject_ngx_api(lua_State *L, ngx_http_lua_main_conf_t *lmcf,
     lua_setfield(L, -2, "ngx"); /* ngx package loaded */
     lua_pop(L, 2);
 
-    /* 设置全局变量ngx */
+    /* 设置表对应的全局名ngx，喔！！！ */
     lua_setglobal(L, "ngx");
 
-    /* 注册协程API */
+    /* 注册协程API, coroutine.xxx */
     ngx_http_lua_inject_coroutine_api(log, L);
 }
 
@@ -2986,7 +2986,7 @@ ngx_http_lua_thread_traceback(lua_State *L, lua_State *co,
     return 1;
 }
 
-
+/* lua_pcall()的错误跟踪函数，以打印错误栈 */
 int
 ngx_http_lua_traceback(lua_State *L)
 {
@@ -3006,9 +3006,9 @@ ngx_http_lua_traceback(lua_State *L)
         return 1;
     }
 
-    lua_pushvalue(L, 1);  /* pass error message */
+    lua_pushvalue(L, 1);    /* pass error message */
     lua_pushinteger(L, 2);  /* skip this function and traceback */
-    lua_call(L, 2, 1);  /* call debug.traceback */
+    lua_call(L, 2, 1);      /* call debug.traceback([thread,] [message [, level]]) */
     return 1;
 }
 
@@ -3019,19 +3019,21 @@ ngx_http_lua_inject_arg_api(lua_State *L)
     lua_pushliteral(L, "arg");
     lua_newtable(L);    /*  .arg table aka {} */
 
-    lua_createtable(L, 0 /* narr */, 2 /* nrec */);    /*  the metatable */
+    /* 创建ngx.arg的metatable表 */
+    lua_createtable(L, 0 /* narr */, 2 /* nrec */);
 
     lua_pushcfunction(L, ngx_http_lua_param_get);
-    lua_setfield(L, -2, "__index");
+    lua_setfield(L, -2, "__index");    /* 查找 */
 
     lua_pushcfunction(L, ngx_http_lua_param_set);
-    lua_setfield(L, -2, "__newindex");
+    lua_setfield(L, -2, "__newindex"); /* 赋值 */
 
     lua_setmetatable(L, -2);    /*  tie the metatable to param table */
 
     dd("top: %d, type -1: %s", lua_gettop(L), luaL_typename(L, -1));
 
-    lua_rawset(L, -3);    /*  set ngx.arg table */
+    /* 新建表赋值给 ngx.arg */
+    lua_rawset(L, -3);
 }
 
 
@@ -3871,7 +3873,7 @@ ngx_http_lua_init_vm(lua_State *parent_vm, ngx_cycle_t *cycle,
         *pcln = cln;
     }
 
-    /* 执行虚拟机加载前的处理回调 */
+    /* 动态加载其他模块儿 */
     if (lmcf->preload_hooks) {
 
         /* register the 3rd-party module's preload hooks */
@@ -4109,39 +4111,42 @@ ngx_http_lua_do_call(ngx_log_t *log, lua_State *L)
     ngx_pool_t         *old_pool;
 #endif
 
+    /* 设定错误处理的跟踪函数 */
     base = lua_gettop(L);  /* function index */
     lua_pushcfunction(L, ngx_http_lua_traceback);  /* push traceback function */
-    lua_insert(L, base);  /* put it under chunk and args */
+    lua_insert(L, base);   /* put it under chunk and args */
 
 #if (NGX_PCRE)
     old_pool = ngx_http_lua_pcre_malloc_init(ngx_cycle->pool);
 #endif
 
+    /* 执行原栈顶函数 */
     status = lua_pcall(L, 0, 0, base);
 
 #if (NGX_PCRE)
     ngx_http_lua_pcre_malloc_done(old_pool);
 #endif
 
+    /* u移除跟踪函数 */
     lua_remove(L, base);
 
     return status;
 }
 
-/* 获取ngx_http_lua_module模块儿的配置信息结构 */
+/* 获取当前Lua模块儿所处的执行阶段，如 NGX_HTTP_LUA_CONTEXT_CONTENT */
 static int
 ngx_http_lua_get_raw_phase_context(lua_State *L)
 {
     ngx_http_request_t      *r;
     ngx_http_lua_ctx_t      *ctx;
 
-    r = lua_touserdata(L, 1);    /* 此信息结构放置在Lua虚拟机栈的第一个 */
+    r = lua_touserdata(L, 1);
     if (r == NULL) {
         return 0;
     }
-
+    /* 存储函数为 ngx_http_set_ctx() */
     ctx = ngx_http_get_module_ctx(r, ngx_http_lua_module);
-    if (ctx == NULL) {
+    if (ctx == NULL) {  /* #define ngx_http_get_module_ctx(r, module)  (r)->ctx[module.ctx_index] */
         return 0;
     }
 

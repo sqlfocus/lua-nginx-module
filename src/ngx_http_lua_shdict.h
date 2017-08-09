@@ -38,14 +38,14 @@ typedef struct {
     ngx_queue_t                   lru_queue;
 } ngx_http_lua_shdict_shctx_t;
 
-/* 共享内存的描述结构 */
+/* 通过配置指令"lua_shared_dict <name> <size>"指定的共享内存的描述结构 */
 typedef struct {
     ngx_http_lua_shdict_shctx_t  *sh;           /* 字典红黑树 */
     ngx_slab_pool_t              *shpool;       /* 共享内存的起始地址 */
-    ngx_str_t                     name;
-    ngx_http_lua_main_conf_t     *main_conf;
+    ngx_str_t                     name;         /* 对应配置指令的<name> */
+    ngx_http_lua_main_conf_t     *main_conf;    /* 对应Lua的http{}层级配置结构 */
     ngx_log_t                    *log;
-    ngx_cycle_t                  *cycle;
+    ngx_cycle_t                  *cycle;        /* 当前NGINX配置 */
 } ngx_http_lua_shdict_ctx_t;
 
 

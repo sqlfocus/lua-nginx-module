@@ -133,7 +133,7 @@ static ngx_command_t ngx_http_lua_cmds[] = {
       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_HTTP_LIF_CONF
                         |NGX_CONF_FLAG,
       ngx_http_lua_code_cache,
-      NGX_HTTP_LOC_CONF_OFFSET,
+      NGX_HTTP_LOC_CONF_OFFSET,     /* 对应location配置 */
       offsetof(ngx_http_lua_loc_conf_t, enable_code_cache),
       NULL },
 
@@ -141,7 +141,7 @@ static ngx_command_t ngx_http_lua_cmds[] = {
       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_HTTP_LIF_CONF
                         |NGX_CONF_FLAG,
       ngx_conf_set_flag_slot,
-      NGX_HTTP_LOC_CONF_OFFSET,
+      NGX_HTTP_LOC_CONF_OFFSET,     /* 推荐在lua环境使用函数ngx.req.discard_body()/ngx.req.read_body()操控报文请求体，更灵活 */
       offsetof(ngx_http_lua_loc_conf_t, force_read_body),
       NULL },
 
@@ -161,20 +161,19 @@ static ngx_command_t ngx_http_lua_cmds[] = {
       offsetof(ngx_http_lua_loc_conf_t, log_socket_errors),
       NULL },
 
+    /* 注册在worker进程启动前运行的脚本 */
     { ngx_string("init_by_lua_block"),
       NGX_HTTP_MAIN_CONF|NGX_CONF_BLOCK|NGX_CONF_NOARGS,
       ngx_http_lua_init_by_lua_block,
       NGX_HTTP_MAIN_CONF_OFFSET,
       0,
       (void *) ngx_http_lua_init_by_inline },
-
     { ngx_string("init_by_lua"),
       NGX_HTTP_MAIN_CONF|NGX_CONF_TAKE1,
       ngx_http_lua_init_by_lua,
       NGX_HTTP_MAIN_CONF_OFFSET,
       0,
       (void *) ngx_http_lua_init_by_inline },
-
     { ngx_string("init_by_lua_file"),
       NGX_HTTP_MAIN_CONF|NGX_CONF_TAKE1,
       ngx_http_lua_init_by_lua,
@@ -182,20 +181,20 @@ static ngx_command_t ngx_http_lua_cmds[] = {
       0,
       (void *) ngx_http_lua_init_by_file },
 
+    
+    /* worker进程启动后，运行for(;;)前执行的脚本 */
     { ngx_string("init_worker_by_lua_block"),
       NGX_HTTP_MAIN_CONF|NGX_CONF_BLOCK|NGX_CONF_NOARGS,
       ngx_http_lua_init_worker_by_lua_block,
       NGX_HTTP_MAIN_CONF_OFFSET,
       0,
       (void *) ngx_http_lua_init_worker_by_inline },
-
     { ngx_string("init_worker_by_lua"),
       NGX_HTTP_MAIN_CONF|NGX_CONF_TAKE1,
       ngx_http_lua_init_worker_by_lua,
       NGX_HTTP_MAIN_CONF_OFFSET,
       0,
       (void *) ngx_http_lua_init_worker_by_inline },
-
     { ngx_string("init_worker_by_lua_file"),
       NGX_HTTP_MAIN_CONF|NGX_CONF_TAKE1,
       ngx_http_lua_init_worker_by_lua,
@@ -203,6 +202,7 @@ static ngx_command_t ngx_http_lua_cmds[] = {
       0,
       (void *) ngx_http_lua_init_worker_by_file },
 
+    
 #if defined(NDK) && NDK
     /* set_by_lua $res { inline Lua code } [$arg1 [$arg2 [...]]] */
     { ngx_string("set_by_lua_block"),
@@ -305,6 +305,7 @@ static ngx_command_t ngx_http_lua_cmds[] = {
       0,
       (void *) ngx_http_lua_log_handler_inline },
 
+    /* 暴露的各phase处理函数 */
     { ngx_string("rewrite_by_lua_file"),
       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_HTTP_LIF_CONF
                         |NGX_CONF_TAKE1,
@@ -413,9 +414,10 @@ static ngx_command_t ngx_http_lua_cmds[] = {
       NGX_HTTP_UPS_CONF|NGX_CONF_TAKE1,
       ngx_http_lua_balancer_by_lua,
       NGX_HTTP_SRV_CONF_OFFSET,
-      0,
+      0,                             /* 对应upstream负载均衡器 */
       (void *) ngx_http_lua_balancer_handler_file },
 
+    /* 对应cosocket网络配置 */
     { ngx_string("lua_socket_keepalive_timeout"),
       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF
           |NGX_HTTP_LIF_CONF|NGX_CONF_TAKE1,
@@ -496,6 +498,7 @@ static ngx_command_t ngx_http_lua_cmds[] = {
       offsetof(ngx_http_lua_loc_conf_t, use_default_type),
       NULL },
 
+    /* SSL配置，控制downstream的SSL链路 */
 #if (NGX_HTTP_SSL)
 
 #   if defined(nginx_version) && nginx_version >= 1001013
@@ -616,7 +619,7 @@ ngx_module_t ngx_http_lua_module = {
     NGX_HTTP_MODULE,            /*  模块儿类型 */
     NULL,                       /*  init master */
     NULL,                       /*  init module */
-    ngx_http_lua_init_worker,   /*  在worker进程for(;;)执行前被调用 */
+    ngx_http_lua_init_worker,   /*  init process, 在worker进程for(;;)执行前被调用 */
     NULL,                       /*  init thread */
     NULL,                       /*  exit thread */
     NULL,                       /*  exit process */
@@ -625,8 +628,8 @@ ngx_module_t ngx_http_lua_module = {
 };
 
 /* 在ngx_module_t->ctx->postconfiguration()中调用，http{}配置解析完成后;
-   创建并初始化Lua虚拟机
-   */
+   创建并初始化Lua虚拟机, 并根据配置信息初始化Lua配置环境，暴露全局变量
+   ngx等，以便通过fork()被后续的worker进程继承 */
 static ngx_int_t
 ngx_http_lua_init(ngx_conf_t *cf)
 {
@@ -642,15 +645,14 @@ ngx_http_lua_init(ngx_conf_t *cf)
 #endif
 
     lmcf = ngx_http_conf_get_module_main_conf(cf, ngx_http_lua_module);
-
     if (ngx_http_lua_prev_cycle != ngx_cycle) {
         ngx_http_lua_prev_cycle = ngx_cycle;
-        multi_http_blocks = 0;
-
+        multi_http_blocks = 0;    /* 鉴别是否由多个http{} */
     } else {
         multi_http_blocks = 1;
     }
 
+    /* 注册子请求输出body/header过滤链 */
     if (multi_http_blocks || lmcf->requires_capture_filter) {
         rc = ngx_http_lua_capture_filter_init(cf);
         if (rc != NGX_OK) {
@@ -666,35 +668,30 @@ ngx_http_lua_init(ngx_conf_t *cf)
         lmcf->postponed_to_access_phase_end = 0;
     }
 
+    /* 注册phase处理句柄 */
     cmcf = ngx_http_conf_get_module_main_conf(cf, ngx_http_core_module);
 
-    /* 配置了 rewrite_by_lua* 指令 */
     if (lmcf->requires_rewrite) {
         h = ngx_array_push(&cmcf->phases[NGX_HTTP_REWRITE_PHASE].handlers);
-        if (h == NULL) {
+        if (h == NULL) {    /* 配置了 rewrite_by_lua* 指令 */
             return NGX_ERROR;
         }
 
         *h = ngx_http_lua_rewrite_handler;
     }
-
-    /* 配置了 access_by_lua*指令 */
     if (lmcf->requires_access) {
         h = ngx_array_push(&cmcf->phases[NGX_HTTP_ACCESS_PHASE].handlers);
-        if (h == NULL) {
+        if (h == NULL) {    /* 配置了 access_by_lua*指令 */
             return NGX_ERROR;
         }
 
         *h = ngx_http_lua_access_handler;
     }
-
     dd("requires log: %d", (int) lmcf->requires_log);
-
-    /* 配置了 log_by_lua*指令 */
     if (lmcf->requires_log) {
         arr = &cmcf->phases[NGX_HTTP_LOG_PHASE].handlers;
         h = ngx_array_push(arr);
-        if (h == NULL) {
+        if (h == NULL) {    /* 配置了 log_by_lua*指令 */
             return NGX_ERROR;
         }
 
@@ -706,19 +703,15 @@ ngx_http_lua_init(ngx_conf_t *cf)
 
         *h = ngx_http_lua_log_handler;
     }
-
-    /* 配置了 header_filter_by_lua* 指令 */
     if (multi_http_blocks || lmcf->requires_header_filter) {
         rc = ngx_http_lua_header_filter_init();
-        if (rc != NGX_OK) {
+        if (rc != NGX_OK) { /* 配置了 header_filter_by_lua* 指令 */
             return rc;
         }
     }
-
-    /* 配置了 body_filter_by_lua* 指令 */
     if (multi_http_blocks || lmcf->requires_body_filter) {
         rc = ngx_http_lua_body_filter_init();
-        if (rc != NGX_OK) {
+        if (rc != NGX_OK) { /* 配置了 body_filter_by_lua* 指令 */
             return rc;
         }
     }
@@ -744,7 +737,7 @@ ngx_http_lua_init(ngx_conf_t *cf)
 
         lmcf->lua = ngx_http_lua_init_vm(NULL, cf->cycle, cf->pool, lmcf,
                                          cf->log, NULL);
-        if (lmcf->lua == NULL) {
+        if (lmcf->lua == NULL) {    /* 创建虚拟机 */
             ngx_conf_log_error(NGX_LOG_ERR, cf, 0,
                                "failed to initialize Lua VM");
             return NGX_ERROR;
@@ -755,15 +748,13 @@ ngx_http_lua_init(ngx_conf_t *cf)
             ngx_cycle = cf->cycle;
 
             rc = lmcf->init_handler(cf->log, lmcf, lmcf->lua);
-
-            ngx_cycle = saved_cycle;
-
-            if (rc != NGX_OK) {
-                /* an error happened */
-                return NGX_ERROR;
+                                    /* 配置指令"init_by_lua_file" */
+            ngx_cycle = saved_cycle;/* =ngx_http_lua_init_by_file() */
+            if (rc != NGX_OK) {     /* 如果配置了共享内存，此函数在共享内存业务 */
+                /* an error happened */ /* 初始化函数ngx_http_lua_shdict_init_zone() */
+                return NGX_ERROR;       /* 中被调用 */
             }
         }
-
         dd("Lua VM initialized!");
     }
 
@@ -888,7 +879,7 @@ ngx_http_lua_init_main_conf(ngx_conf_t *cf, void *conf)
     return NGX_CONF_OK;
 }
 
-/* 分配lua nginx模块儿的主环境配置结构，挂接在ngx_cycle_t->
+/* 分配lua nginx模块儿的http{server{}}级配置结构，挂接在ngx_cycle_t->
    ctx[ngx_http_module index]->srv_conf[ngx_http_lua_module->ctx_index] */
 static void *
 ngx_http_lua_create_srv_conf(ngx_conf_t *cf)
@@ -926,13 +917,13 @@ static char *
 ngx_http_lua_merge_srv_conf(ngx_conf_t *cf, void *parent, void *child)
 {
 #if (NGX_HTTP_SSL)
-
     ngx_http_lua_srv_conf_t *prev = parent;
     ngx_http_lua_srv_conf_t *conf = child;
     ngx_http_ssl_srv_conf_t *sscf;
 
     dd("merge srv conf");
 
+    /* 设置配置指令“ssl_certificate_by_lua_file”的处理句柄 */
     if (conf->srv.ssl_cert_src.len == 0) {
         conf->srv.ssl_cert_src = prev->srv.ssl_cert_src;
         conf->srv.ssl_cert_src_key = prev->srv.ssl_cert_src_key;
@@ -957,20 +948,18 @@ ngx_http_lua_merge_srv_conf(ngx_conf_t *cf, void *parent, void *child)
 #else
 
 #   if OPENSSL_VERSION_NUMBER >= 0x1000205fL
-
+        /* 设置处理句柄 */
         SSL_CTX_set_cert_cb(sscf->ssl.ctx, ngx_http_lua_ssl_cert_handler, NULL);
-
 #   else
-
         ngx_log_error(NGX_LOG_EMERG, cf->log, 0,
                       "OpenSSL too old to support ssl_ceritificate_by_lua*");
         return NGX_CONF_ERROR;
-
 #   endif
 
 #endif
     }
 
+    /* 设置“ssl_session_store_by_lua_file”处理句柄 */
     if (conf->srv.ssl_sess_store_src.len == 0) {
         conf->srv.ssl_sess_store_src = prev->srv.ssl_sess_store_src;
         conf->srv.ssl_sess_store_src_key = prev->srv.ssl_sess_store_src_key;
@@ -991,11 +980,12 @@ ngx_http_lua_merge_srv_conf(ngx_conf_t *cf, void *parent, void *child)
                       "LibreSSL does not support ssl_session_store_by_lua*");
         return NGX_CONF_ERROR;
 #else
-        SSL_CTX_sess_set_new_cb(sscf->ssl.ctx,
+        SSL_CTX_sess_set_new_cb(sscf->ssl.ctx,  /* 设置句柄 */
                                 ngx_http_lua_ssl_sess_store_handler);
 #endif
     }
 
+    /* 设置“ssl_session_fetch_by_lua_file”处理句柄 */
     if (conf->srv.ssl_sess_fetch_src.len == 0) {
         conf->srv.ssl_sess_fetch_src = prev->srv.ssl_sess_fetch_src;
         conf->srv.ssl_sess_fetch_src_key = prev->srv.ssl_sess_fetch_src_key;
@@ -1010,13 +1000,12 @@ ngx_http_lua_merge_srv_conf(ngx_conf_t *cf, void *parent, void *child)
 
             return NGX_CONF_ERROR;
         }
-
 #ifdef LIBRESSL_VERSION_NUMBER
         ngx_log_error(NGX_LOG_EMERG, cf->log, 0,
                       "LibreSSL does not support ssl_session_fetch_by_lua*");
         return NGX_CONF_ERROR;
 #else
-        SSL_CTX_sess_set_get_cb(sscf->ssl.ctx,
+        SSL_CTX_sess_set_get_cb(sscf->ssl.ctx, /* 设置句柄 */
                                 ngx_http_lua_ssl_sess_fetch_handler);
 #endif
     }
@@ -1139,7 +1128,6 @@ ngx_http_lua_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child)
     }
 
 #if (NGX_HTTP_SSL)
-
 #   if defined(nginx_version) && nginx_version >= 1001013
 
     ngx_conf_merge_bitmask_value(conf->ssl_protocols, prev->ssl_protocols,
@@ -1158,6 +1146,7 @@ ngx_http_lua_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child)
                              prev->ssl_trusted_certificate, "");
     ngx_conf_merge_str_value(conf->ssl_crl, prev->ssl_crl, "");
 
+    /* 创建SSL环境，做为客户端，用于cosocket主动发起ssl链路 */
     if (ngx_http_lua_set_ssl(cf, conf) != NGX_OK) {
         return NGX_CONF_ERROR;
     }
@@ -1207,6 +1196,14 @@ ngx_http_lua_set_ssl(ngx_conf_t *cf, ngx_http_lua_loc_conf_t *llcf)
 {
     ngx_pool_cleanup_t  *cln;
 
+    /* 分配内存，SSL环境 */
+#if 0
+typedef struct {
+    SSL_CTX                    *ctx;          /* openssl底层支持的SSL环境 */
+    ngx_log_t                  *log;
+    size_t                      buffer_size;  /* 接收报文缓存大小 */
+} ngx_ssl_t;
+#endif
     llcf->ssl = ngx_pcalloc(cf->pool, sizeof(ngx_ssl_t));
     if (llcf->ssl == NULL) {
         return NGX_ERROR;
@@ -1214,18 +1211,20 @@ ngx_http_lua_set_ssl(ngx_conf_t *cf, ngx_http_lua_loc_conf_t *llcf)
 
     llcf->ssl->log = cf->log;
 
+    /* 创建SSL环境，参考${nginx-src-path}/src/event/ngx_event_openssl.c */
     if (ngx_ssl_create(llcf->ssl, llcf->ssl_protocols, NULL) != NGX_OK) {
         return NGX_ERROR;
     }
 
+    /* 设定资源清理句柄 */
     cln = ngx_pool_cleanup_add(cf->pool, 0);
     if (cln == NULL) {
         return NGX_ERROR;
     }
-
     cln->handler = ngx_ssl_cleanup_ctx;
     cln->data = llcf->ssl;
 
+    /* 设定加密套件 */
     if (SSL_CTX_set_cipher_list(llcf->ssl->ctx,
                                 (const char *) llcf->ssl_ciphers.data)
         == 0)
@@ -1236,6 +1235,7 @@ ngx_http_lua_set_ssl(ngx_conf_t *cf, ngx_http_lua_loc_conf_t *llcf)
         return NGX_ERROR;
     }
 
+    /* 加载可信任CA列表，用于验证服务器 */
     if (llcf->ssl_trusted_certificate.len) {
 
 #if defined(nginx_version) && nginx_version >= 1003007
@@ -1258,8 +1258,8 @@ ngx_http_lua_set_ssl(ngx_conf_t *cf, ngx_http_lua_loc_conf_t *llcf)
 #endif
     }
 
+    /* 加载CRL列表 */
     dd("ssl crl: %.*s", (int) llcf->ssl_crl.len, llcf->ssl_crl.data);
-
     if (ngx_ssl_crl(cf, llcf->ssl, &llcf->ssl_crl) != NGX_OK) {
         return NGX_ERROR;
     }

@@ -26,7 +26,7 @@ ngx_http_lua_init_by_inline(ngx_log_t *log, ngx_http_lua_main_conf_t *lmcf,
     return ngx_http_lua_report(log, L, status, "init_by_lua");
 }
 
-
+/* 加载并执行配置指令“init_by_lua_file xxx”指定的脚本文件 */
 ngx_int_t
 ngx_http_lua_init_by_file(ngx_log_t *log, ngx_http_lua_main_conf_t *lmcf,
     lua_State *L)

@@ -143,18 +143,18 @@ ngx_http_lua_balancer_by_lua(ngx_conf_t *cf, ngx_command_t *cmd,
 
     value = cf->args->elts;
 
+    /* 设置Lua层面处理句柄 */
     lscf->balancer.handler = (ngx_http_lua_srv_conf_handler_pt) cmd->post;
-
     if (cmd->post == ngx_http_lua_balancer_handler_file) {
         /* Lua code in an external file */
 
         name = ngx_http_lua_rebase_path(cf->pool, value[1].data,
                                         value[1].len);
-        if (name == NULL) {
+        if (name == NULL) {               /* 获取绝对路径 */
             return NGX_CONF_ERROR;
         }
 
-        lscf->balancer.src.data = name;
+        lscf->balancer.src.data = name;   /* 记录文件名 */
         lscf->balancer.src.len = ngx_strlen(name);
 
         p = ngx_palloc(cf->pool, NGX_HTTP_LUA_FILE_KEY_LEN + 1);
@@ -162,12 +162,10 @@ ngx_http_lua_balancer_by_lua(ngx_conf_t *cf, ngx_command_t *cmd,
             return NGX_CONF_ERROR;
         }
 
-        lscf->balancer.src_key = p;
-
+        lscf->balancer.src_key = p;       /* 记录文件名hash值 */
         p = ngx_copy(p, NGX_HTTP_LUA_FILE_TAG, NGX_HTTP_LUA_FILE_TAG_LEN);
         p = ngx_http_lua_digest_hex(p, value[1].data, value[1].len);
         *p = '\0';
-
     } else {
         /* inlined Lua code */
 
@@ -185,13 +183,14 @@ ngx_http_lua_balancer_by_lua(ngx_conf_t *cf, ngx_command_t *cmd,
         *p = '\0';
     }
 
+    /* 获取upstream配置结构 */
     uscf = ngx_http_conf_get_module_srv_conf(cf, ngx_http_upstream_module);
-
     if (uscf->peer.init_upstream) {
         ngx_conf_log_error(NGX_LOG_WARN, cf, 0,
                            "load balancing method redefined");
     }
 
+    /* 设置upstream初始化函数 */
     uscf->peer.init_upstream = ngx_http_lua_balancer_init;
 
     uscf->flags = NGX_HTTP_UPSTREAM_CREATE
@@ -203,7 +202,7 @@ ngx_http_lua_balancer_by_lua(ngx_conf_t *cf, ngx_command_t *cmd,
     return NGX_CONF_OK;
 }
 
-
+/* 配置指令“balancer_by_lua_file”对应的upstream环境初始化 */
 static ngx_int_t
 ngx_http_lua_balancer_init(ngx_conf_t *cf,
     ngx_http_upstream_srv_conf_t *us)
@@ -218,7 +217,7 @@ ngx_http_lua_balancer_init(ngx_conf_t *cf,
     return NGX_OK;
 }
 
-
+/* 每请求调用，获取对应的后端服务器 */
 static ngx_int_t
 ngx_http_lua_balancer_init_peer(ngx_http_request_t *r,
     ngx_http_upstream_srv_conf_t *us)

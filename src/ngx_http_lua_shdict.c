@@ -77,7 +77,7 @@ ngx_http_lua_shdict_get_list_head(ngx_http_lua_shdict_node_t *sd, size_t len)
                                          NGX_ALIGNMENT);
 }
 
-/* 共享内存初始化句柄 */
+/* 共享内存分配成功后，业务初始化句柄 */
 ngx_int_t
 ngx_http_lua_shdict_init_zone(ngx_shm_zone_t *shm_zone, void *data)
 {

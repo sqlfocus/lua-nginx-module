@@ -26,7 +26,7 @@ static ngx_int_t ngx_http_lua_capture_header_filter(ngx_http_request_t *r);
 static ngx_int_t ngx_http_lua_capture_body_filter(ngx_http_request_t *r,
     ngx_chain_t *in);
 
-
+/* 注册Lua层面的子请求body/header过滤链 */
 ngx_int_t
 ngx_http_lua_capture_filter_init(ngx_conf_t *cf)
 {

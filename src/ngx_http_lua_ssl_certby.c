@@ -127,7 +127,7 @@ ngx_http_lua_ssl_cert_by_lua(ngx_conf_t *cf, ngx_command_t *cmd,
         return "is duplicate";
     }
 
-    if (ngx_http_lua_ssl_init(cf->log) != NGX_OK) {
+"lua_use_default_type"    if (ngx_http_lua_ssl_init(cf->log) != NGX_OK) {
         return NGX_CONF_ERROR;
     }
 
@@ -180,7 +180,7 @@ ngx_http_lua_ssl_cert_by_lua(ngx_conf_t *cf, ngx_command_t *cmd,
 #endif  /* OPENSSL_VERSION_NUMBER < 0x1000205fL */
 }
 
-
+/* 配置指令"ssl_certificate_by_lua_file xxx"的处理句柄 */
 int
 ngx_http_lua_ssl_cert_handler(ngx_ssl_conn_t *ssl_conn, void *data)
 {

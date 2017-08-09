@@ -69,7 +69,6 @@ ngx_http_lua_init_worker(ngx_cycle_t *cycle)
      * because some modules like ngx_http_core_module reference
      * addresses within cf->cycle (i.e., via "&cf->cycle->new_log")
      */
-
     fake_cycle = ngx_palloc(cycle->pool, sizeof(ngx_cycle_t));
     if (fake_cycle == NULL) {
         goto failed;
@@ -92,7 +91,6 @@ ngx_http_lua_init_worker(ngx_cycle_t *cycle)
     }
 
 #if defined(nginx_version) && nginx_version >= 1003007
-
     if (ngx_array_init(&fake_cycle->paths, cycle->pool, cycle->paths.nelts || 1,
                        sizeof(ngx_path_t *))
         != NGX_OK)
@@ -262,6 +260,7 @@ ngx_http_lua_init_worker(ngx_cycle_t *cycle)
 
 #endif
 
+    /* 构建请求对应的Lua执行环境，并相互关联 */
     ctx = ngx_http_lua_create_ctx(r);
     if (ctx == NULL) {
         goto failed;
@@ -271,8 +270,13 @@ ngx_http_lua_init_worker(ngx_cycle_t *cycle)
     ctx->cur_co_ctx = NULL;
     r->read_event_handler = ngx_http_block_reading;
 
+    /* 设置lua环境 _G["__ngx_req"] 的值为当前请求 */
     ngx_http_lua_set_req(lmcf->lua, r);
 
+    /* <TAKECARE!!!>前置的所有操作，仅仅是为了添加一个虚拟请求，因为后续
+                    脚本执行需要请求环境(可查看ngx.timer.at()执行函数) */
+
+    /* 对应配置指令“init_worker_by_lua_file”, =ngx_http_lua_init_worker_by_file() */
     (void) lmcf->init_worker_handler(cycle->log, lmcf, lmcf->lua);
 
     ngx_destroy_pool(c->pool);
@@ -287,7 +291,7 @@ failed:
     if (c) {
         ngx_http_lua_close_fake_connection(c);
     }
-
+ 
     return NGX_ERROR;
 }
 
@@ -305,7 +309,7 @@ ngx_http_lua_init_worker_by_inline(ngx_log_t *log,
     return ngx_http_lua_report(log, L, status, "init_worker_by_lua");
 }
 
-
+/* 对应配置指令“init_worker_by_lua_file”的执行函数 */
 ngx_int_t
 ngx_http_lua_init_worker_by_file(ngx_log_t *log, ngx_http_lua_main_conf_t *lmcf,
     lua_State *L)

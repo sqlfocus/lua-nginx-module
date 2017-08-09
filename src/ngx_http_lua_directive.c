@@ -118,15 +118,14 @@ ngx_http_lua_shared_dict(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     if (ctx == NULL) {
         return NGX_CONF_ERROR;
     }
-
     ctx->name = name;
     ctx->main_conf = lmcf;
     ctx->log = &cf->cycle->new_log;
     ctx->cycle = cf->cycle;
 
-    /* 记录到ngx_cycle->shared_memory，待配置解析完毕后分配真实的内存 */
+    /* 记录到 ngx_cycle->shared_memory, 待配置解析完毕后分配真实的内存 */
     zone = ngx_shared_memory_add(cf, &name, (size_t) size,
-                                 &ngx_http_lua_module);
+                                 &ngx_http_lua_module); /* 设定对应的模块儿 */
     if (zone == NULL) {
         return NGX_CONF_ERROR;
     }

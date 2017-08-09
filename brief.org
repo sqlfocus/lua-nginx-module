@@ -400,6 +400,7 @@ ngx.location.capture的方法)处理。
   - ngx.exec()            :: 内部跳转，终止当前请求的处理，一般与return联合使用
   - ngx.location.capture()         :: 内部子请求，同步非阻塞 
   - ngx.location.capture_multi()   :: 多个并发的内部子请求
+
 * 参考
   - lua.org
   - [[https://github.com/sqlfocus/nginx][nginx注解]]

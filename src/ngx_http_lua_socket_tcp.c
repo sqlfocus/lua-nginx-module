@@ -200,7 +200,7 @@ ngx_http_lua_inject_socket_tcp_api(ngx_log_t *log, lua_State *L)
     lua_createtable(L, 0, 4 /* nrec */);    /* ngx.socket */
 
     lua_pushcfunction(L, ngx_http_lua_socket_tcp);
-    lua_pushvalue(L, -1);
+    lua_pushvalue(L, -1);       /* 设置ngx.socket.tcp/stream()的处理函数 */
     lua_setfield(L, -3, "tcp");
     lua_setfield(L, -2, "stream");
 
@@ -216,14 +216,14 @@ ngx_http_lua_inject_socket_tcp_api(ngx_log_t *log, lua_State *L)
         ngx_log_error(NGX_LOG_CRIT, log, 0,
                       "failed to load Lua code for ngx.socket.connect(): %i",
                       rc);
-
-    } else {
+    } else {                    /* 设置ngx.socket.connect()代码块儿 */
         lua_setfield(L, -2, "connect");
     }
 
+    /* 设置ngx.socket表 */
     lua_setfield(L, -2, "socket");
 
-    /* {{{req socket object metatable */
+    /* 新建注册表，请求socket的metatable，{{{req socket object metatable */
     lua_pushlightuserdata(L, &ngx_http_lua_req_socket_metatable_key);
     lua_createtable(L, 0 /* narr */, 4 /* nrec */);
 
@@ -242,7 +242,7 @@ ngx_http_lua_inject_socket_tcp_api(ngx_log_t *log, lua_State *L)
     lua_rawset(L, LUA_REGISTRYINDEX);
     /* }}} */
 
-    /* {{{raw req socket object metatable */
+    /* 新建注册表，原始请求socket的metatable，{{{raw req socket object metatable */
     lua_pushlightuserdata(L, &ngx_http_lua_raw_req_socket_metatable_key);
     lua_createtable(L, 0 /* narr */, 5 /* nrec */);
 
@@ -264,7 +264,7 @@ ngx_http_lua_inject_socket_tcp_api(ngx_log_t *log, lua_State *L)
     lua_rawset(L, LUA_REGISTRYINDEX);
     /* }}} */
 
-    /* {{{tcp object metatable */
+    /* 新建注册表，tcpsock的metatable表，{{{tcp object metatable */
     lua_pushlightuserdata(L, &ngx_http_lua_tcp_socket_metatable_key);
     lua_createtable(L, 0 /* narr */, 11 /* nrec */);
 

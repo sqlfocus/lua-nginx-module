@@ -262,8 +262,8 @@ ngx_http_lua_init_ctx(ngx_http_request_t *r, ngx_http_lua_ctx_t *ctx)
     ngx_memzero(ctx, sizeof(ngx_http_lua_ctx_t));
     ctx->ctx_ref = LUA_NOREF;
     ctx->entry_co_ctx.co_ref = LUA_NOREF;
-    ctx->resume_handler = ngx_http_lua_wev_handler;
-    ctx->request = r;
+    ctx->resume_handler = ngx_http_lua_wev_handler; /* 设定环境恢复脚本 */
+    ctx->request = r;      /* 和请求关联 */
 }
 
 /* 构造Lua的执行环境，由lua_code_cache配置指令决定是否需要针对每个HTTP
@@ -277,14 +277,14 @@ ngx_http_lua_create_ctx(ngx_http_request_t *r)
     ngx_http_lua_loc_conf_t     *llcf;
     ngx_http_lua_main_conf_t    *lmcf;
 
-    /* 分配Lua虚拟机环境 */
+    /* 分配Lua虚拟机执行环境信息结构 */
     ctx = ngx_palloc(r->pool, sizeof(ngx_http_lua_ctx_t));
     if (ctx == NULL) {
         return NULL;
     }
-    ngx_http_lua_init_ctx(r, ctx);
-    /* 记录到ngx_http_request_t */
-    ngx_http_set_ctx(r, ctx, ngx_http_lua_module);
+    ngx_http_lua_init_ctx(r, ctx);                 /* 关联具体的请求 */
+    /* #define ngx_http_set_ctx(r, c, module)  r->ctx[module.ctx_index] = c; */
+    ngx_http_set_ctx(r, ctx, ngx_http_lua_module); /* 记录到请求 */
 
     /* 当配置指令lua_code_cache为off时，创建新虚拟机 */
     llcf = ngx_http_get_module_loc_conf(r, ngx_http_lua_module);
@@ -302,7 +302,7 @@ ngx_http_lua_create_ctx(ngx_http_request_t *r)
             return NULL;
         }
 
-        /* 执行配置指令init_by_lua*指定的脚本和代码段 */
+        /* 执行配置指令“init_by_lua_file”指定的脚本 */
         if (lmcf->init_handler) {
             if (lmcf->init_handler(r->connection->log, lmcf, L) != NGX_OK) {
                 /* an error happened */
@@ -358,7 +358,7 @@ ngx_http_lua_get_req(lua_State *L)
     return r;
 }
 
-/* 设置全局变量ngx_http_lua_req_key，即索引["__ngx_req"]的值 */
+/* 设置全局变量ngx_http_lua_req_key，即_G["__ngx_req"]的值, 指向当前请求 */
 static ngx_inline void
 ngx_http_lua_set_req(lua_State *L, ngx_http_request_t *r)
 {
