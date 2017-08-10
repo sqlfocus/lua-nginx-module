@@ -262,8 +262,72 @@ ssl_session_fetch_by_lua_file
    ngx_http_lua_ssl_sess_fetch_handler()
 ssl_session_store_by_lua_file
    ngx_http_lua_ssl_sess_store_handler()
-* TODO cosocket
-ab
+
+* cosocket
+openresty实现了非阻塞的原生态插口结构ngx.socket，兼容LuaSocket库；并且
+引入了一些新特性；目前支持ngx.socket.tcp/.udp/.stream
+
+#+BEGIN_EXAMPLE
+-ngx_http_lua_init()                ~/src/ngx_http_lua_module.c
+  -ngx_http_lua_init_vm()           创建虚拟机，~/src/ngx_http_lua_util.c
+    -ngx_http_lua_new_state()
+      -luaL_newstate()                  创建虚拟机运行栈
+      -luaL_openlibs()                  打开共享库
+      -修改package.path/cpath搜索路径
+      -ngx_http_lua_init_registry()     初始化注册表，用于模块儿间共享
+      -ngx_http_lua_init_globals()      初始化全局变量，如ngx、ndk、__ngx_cycle等
+        -ngx_http_lua_inject_ndk_api()
+        -ngx_http_lua_inject_ngx_api()  注册非阻塞插口，cosocket
+          -ngx_http_lua_inject_socket_tcp_api()
+            -->ngx.socket.tcp/stream()处理函数ngx_http_lua_socket_tcp()
+            -->新建元表，注册表索引ngx_http_lua_tcp_socket_metatable_key
+              -ngx_http_lua_socket_tcp_connect()         "connect"
+              -ngx_http_lua_socket_tcp_sslhandshake()    "sslhandshake"
+              -ngx_http_lua_socket_tcp_receive()         "receive"
+              -ngx_http_lua_socket_tcp_receiveuntil()    "receiveuntil"
+              -ngx_http_lua_socket_tcp_send()            "send"
+              -ngx_http_lua_socket_tcp_close()           "close"
+              -ngx_http_lua_socket_tcp_setoption()       "setoption"
+              -ngx_http_lua_socket_tcp_settimeout()      "settimeout"
+              -ngx_http_lua_socket_tcp_getreusedtimes()  "getreusedtimes"
+              -ngx_http_lua_socket_tcp_setkeepalive()    "setkeepalive"
+          -ngx_http_lua_inject_socket_udp_api()
+            -->ngx.socket.udp()处理函数ngx_http_lua_socket_udp()
+#+END_EXAMPLE
+
+** TCP
+#+BEGIN_EXAMPLE
+创建对象, ngx.socket.tcp()
+
+-ngx_http_lua_socket_tcp()             ~/src/ngx_http_lua_socket_tcp.c
+  -lua_createtable()                   创建对象
+  -lua_setmetatable()                  指定元表为注册表索引ngx_http_lua_tcp_socket_metatable_key
+#+END_EXAMPLE
+
+#+BEGIN_EXAMPLE
+连接服务器，tcpsock:connect()，目前不支持负载均衡
+-ngx_http_lua_socket_tcp_connect()     ~/src/ngx_http_lua_socket_tcp.c
+  -lua_newuserdata()                   新建上下文，并初始化
+  -ngx_http_lua_get_keepalive_peer()   获取缓存的链路，成功则直接返回
+  -ngx_parse_url()                     本地解析host:port
+  -ngx_http_lua_socket_resolve_retval_handler()
+    -ngx_event_connect_peer()                 连接
+    -ngx_http_lua_socket_connected_handler()  后续connect报文处理句柄
+      -ngx_http_lua_socket_test_connect()        测试连接是否OK
+      -ngx_handle_write_event()                  暂时从EPOLL脱离，避免空转
+      -ngx_handle_read_event()
+      -ngx_http_lua_socket_handle_conn_success()
+        -ngx_http_lua_ctx_t->resume_handler      设置重入函数=ngx_http_lua_socket_tcp_conn_resume()
+  -lua_yield()                         连接ing时主动放弃CPU
+
+连接服务器后，重入Lua虚拟机
+-ngx_http_lua_socket_tcp_conn_resume()
+  -ngx_http_lua_socket_tcp_resume_helper()
+    -ngx_http_lua_socket_tcp_upstream_t->write_prepare_retvals()
+    -->ngx_http_lua_socket_tcp_conn_retval_handler()
+                                       注入返回值
+    -ngx_http_lua_run_thread()         启动Lua虚拟机
+#+END_EXAMPLE
 
 * 参考
   - [[https://github.com/sqlfocus/nginx][nginx代码导读]]

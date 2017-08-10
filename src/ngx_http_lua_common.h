@@ -355,7 +355,7 @@ enum {
 
 /* 跟踪特定阶段的Lua协程环境 */
 struct ngx_http_lua_co_ctx_s {
-    void                    *data;          /* user state for cosockets */
+    void  *data;        /* ngx_http_lua_socket_tcp_upstream_t, user state for cosockets */
 
     lua_State  *co;     /* 通过lua_newthread()创建的协程栈 */
     ngx_http_lua_co_ctx_t *parent_co_ctx;   /* 对应的父协程 */

@@ -71,7 +71,7 @@
 /* 全局注册表 */
 char ngx_http_lua_code_cache_key;        /* 表，缓存Lua脚本代码，以加速执行效率 */
 char ngx_http_lua_regex_cache_key;       /**/
-char ngx_http_lua_socket_pool_key;       /**/
+char ngx_http_lua_socket_pool_key;       /* 表，记录cosocket链路缓存, ngx_http_lua_socket_pool_t */
 char ngx_http_lua_coroutines_key;        /* 表，记录“执行Lua脚本的协程” */
 char ngx_http_lua_headers_metatable_key; /**/
 
