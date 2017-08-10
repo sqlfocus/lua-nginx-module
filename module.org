@@ -127,31 +127,6 @@ _main_conf_t->phases[]；因此这些回调函数可以和nginx的同类型配�
         -ngx_http_finalize_request()
 #+END_EXAMPLE
 
-* DONE 内容处理
-  CLOSED: [2016-11-03 Thu 18:32]
-其他阶段处理和内容类似，以此阶段为例讲述处理流程；在 =ngx_http_lua_init()= 函
-数中注册了各阶段的处理入口句柄，如内容为 =ngx_http_lua_content_handler()= ，此
-函数只是沟通起C和Lua环境之间的关联；随后，正式进入Lua环境的脚本执行，入口函数
-一般为对应配置指令的 =ngx_command_t->post= ，如 =content_by_lua= 指令的处理入
-口为 =ngx_http_lua_content_handler_inline= 。
-
-脚本的执行，都是启动单独的协程，然后在协程中处理的，以便于环境隔离；即便Lua
-脚本崩溃，也不会危及到C代码。
-
-  - 阶段入口 :: =ngx_http_lua_content_handler()/ngx_http_lua_contentby.c=
-  - 对应的Lua环境入口  :: =ngx_http_lua_content_handler_inline/ngx_http_lua_content_handler_file()=
-
-  #+BEGIN_EXAMPLE
-  -ngx_http_lua_content_handler()
-    -ngx_http_lua_content_handler_file()
-      -ngx_http_lua_get_lua_vm()                 加载Lua虚拟机环境
-      -ngx_http_lua_cache_loadfile()             加载脚本
-      -ngx_http_lua_content_by_chunk()           执行脚本
-        -ngx_http_lua_new_thread()
-        -ngx_http_lua_set_req()
-        -ngx_http_lua_run_thread()
-  #+END_EXAMPLE
-
 * DONE 共享内存
   CLOSED: [2016-11-03 Thu 09:43]
 本模块儿的共享内存也是借助nginx的共享内存管理机制；只是在此基础上封装了
@@ -176,47 +151,6 @@ Lua的定时器本质利用了worker的定时器实现，定时器信息结构ng
   - 设置指令的处理句柄   ::  =ngx_http_lua_inject_timer_api()/ngx_http_lua_timer.c=
   - ngx.timer.at()       ::  =ngx_http_lua_ngx_timer_at()=
   - 定时器事件处理句柄   ::  =ngx_http_lua_timer_handler()=
-
-* DONE 协程环境隔离
-  CLOSED: [2016-11-04 Fri 17:57]
-同样，以内容处理流程来介绍，每个HTTP请求处理过程中启、停协程的过程，加
-深对Lua环境的理解，加深对“短连接”概念的理解。
-
-  #+BEGIN_EXAMPLE
-  -ngx_http_lua_content_by_chunk()              内容阶段执行Lua脚本, ngx_http_lua_contentby.c
-    -ngx_http_get_module_ctx()                  获取Lua执行环境，没有则创建
-    -ngx_http_lua_new_thread()                  创建协程
-      -lua_newthread()
-      -ngx_http_lua_set_globals_table()             设置新的全局表
-    -lua_xmove()                                脚本代码移动到协程
-    -lua_setfenv()                              设置脚本代码的执行环境为新建协程
-    -ngx_http_lua_set_req()                     关联请求
-    -ngx_http_lua_run_thread()                  启动协程
-      -lua_atpanic()                                设置自定义panic函数，防止Lua脚本代码崩溃传导到worker进程
-      -NGX_LUA_EXCEPTION_TRY                        利用longjmp实现的错误处理机制，配合panic函数；牛逼！！！
-        -for(;;)
-          -lua_resume()
-      -NGX_LUA_EXCEPTION_CATCH
-  #+END_EXAMPLE
-
-* DONE HTTP请求的环境隔离
-  CLOSED: [2016-11-04 Fri 14:33]
-如果配置lua_code_cache设置了值off，则每个HTTP请求都会设置独立的Lua虚拟机；
-这样，每个请求都需要动态加载通过nginx.conf配置的Lua脚本，从而极大的方便了
-程序开发与调试。
-
-当开发完毕后，配置指令lua_code_cache设置为on，则每个worker利用启动前创建的
-虚拟机环境，所有Lua脚本仅编译加载一次，极大提高了运行效率。
-
-  #+BEGIN_EXAMPLE
-  -ngx_http_lua_create_ctx()                  创建Lua运行环境，ngx_http_lua_util.h
-                                                  此函数在nginx的phase阶段(Lua注册
-                                                  的函数中)被调用
-    -ngx_http_set_ctx()                       存储到ngx_http_request_t，可通过
-                                                  ngx_http_get_module_ctx()获取
-    -if()                                     "lua_code_cache off;"
-      -ngx_http_lua_init_vm()                 记录到ngx_http_lua_ctx_t->vm_state
-  #+END_EXAMPLE
 
 * DONE Lua自定义PANIC函数
   CLOSED: [2016-11-07 Mon 10:58]
@@ -254,8 +188,72 @@ nginx的lua环境和nginx的c是隔离开的，即Lua脚本代码的严重错误
     -NGX_LUA_EXCEPTION_THROW()
   #+END_EXAMPLE
 
-* TODO balancer负载均衡器
-balancer_by_lua_file
+* balancer负载均衡器
+通过配置指令 =http{upstream{balancer_by_lua_file xxx}}= 可以方便的设置七层
+代理的负载均衡器，实现自定义负载均衡的功能。
+
+提供的Lua环境的动态负载均衡模块儿不支持yield！！！
+
+#+BEGIN_EXAMPLE
+配置解析流程
+-main()
+  -ngx_init_cycle()
+    -ngx_conf_parse()                         配置文件解析入口
+      -ngx_conf_read_token()                  读取关键字
+      -ngx_conf_handler()                     处理关键字
+        -ngx_conf_t->cycle->modules[i]->commands->set()
+        -->ngx_http_block()                   http{}处理入口
+          -->ngx_http_core_server()             server{}处理入口
+          -->ngx_http_core_location()           location{}处理入口
+          -->ngx_http_upstream()                upstream{}处理入口，${nginx-src-path}/src/http/ngx_http_upstream.c
+            -ngx_http_lua_balancer_by_lua()     balancer_by_lua_file入口，~/src/ngx_http_lua_balancer.c
+              -设置ngx_http_upstream_srv_conf_t->peer.init_upstream = ngx_http_lua_balancer_init()
+          -ngx_http_upstream_module->->ctx->init_main_conf()
+          -->ngx_http_upstream_init_main_conf() 初始化upstream主配置
+            -ngx_http_upstream_srv_conf_t->peer.init_upstream()
+            -->ngx_http_lua_balancer_init()         自定义负载均衡环境初始化，~/src/ngx_http_lua_balancer.c
+              -ngx_http_upstream_init_round_robin()
+              -设置ngx_http_upstream_srv_conf_t->peer.init = ngx_http_lua_balancer_init_peer()
+            -装载upstream支持的http属性头 ngx_http_upstream_headers_in[]
+#+END_EXAMPLE
+
+#+BEGIN_EXAMPLE
+请求负载流程
+-ngx_http_proxy_handler()            proxy_pass处理入口
+  -ngx_http_read_client_request_body()
+    -ngx_http_upstream_init()
+      -ngx_http_upstream_init_request()
+        -ngx_http_upstream_conf_t->upstream->peer.init()     
+          -->ngx_http_lua_balancer_init_peer()    ~/src/ngx_http_lua_balancer.c
+            -RR环境初始化
+            -设置获取服务器函数->peer.get/free
+                                     初始化LB策略的环境
+        -ngx_http_upstream_connect()
+          -ngx_event_connect_peer()
+            -ngx_peer_connection_t->get()
+            -->ngx_http_lua_balancer_get_peer()   ~/src/ngx_http_lua_balancer.c
+              -ngx_http_lua_srv_conf_t->balancer.handler()
+              -->ngx_http_lua_balancer_handler_file()
+                                    获取合适的后端服务器
+            -connect()              建立连接
+        -ngx_http_upstream_send_request()
+                                    发送请求
+#+END_EXAMPLE
+
+#+BEGIN_EXAMPLE
+LUA脚本需借助ngx.balancer.set_current_peer()将选择的IP、PORT赋值到对应的
+数据结构ngx_http_request_t->upstream->peer.data(ngx_http_lua_balancer_peer_data_t)->sockaddr
+
+ngx.balancer模块儿并没有随ngx_lua发布，而是放置在lua-resty-core模块儿中，
+以纯Lua模块儿发布。
+
+-set_current_peer()                  ${lua-resty-core}/lib/ngx/balancer.lua
+  -getfenv(0).__ngx_req              获取对应的请求
+  -ngx_http_lua_ffi_balancer_set_current_peer()
+                                     ~/src/ngx_http_lua_balancer.c
+    -ngx_parse_url()
+    -赋值->sockaddr/socklen/host
+#+END_EXAMPLE
 
 * TODO SSL
 ssl_certificate_by_lua_file

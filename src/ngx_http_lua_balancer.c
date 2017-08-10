@@ -18,24 +18,24 @@
 
 struct ngx_http_lua_balancer_peer_data_s {
     /* the round robin data must be first */
-    ngx_http_upstream_rr_peer_data_t    rrp;
+    ngx_http_upstream_rr_peer_data_t    rrp;   /* RR算法数据 */
 
-    ngx_http_lua_srv_conf_t            *conf;
-    ngx_http_request_t                 *request;
+    ngx_http_lua_srv_conf_t *conf;     /* 原始配置 */
+    ngx_http_request_t    *request;    /* 对应的请求 */
 
-    ngx_uint_t                          more_tries;
-    ngx_uint_t                          total_tries;
+    ngx_uint_t    more_tries;
+    ngx_uint_t    total_tries;
 
-    struct sockaddr                    *sockaddr;
-    socklen_t                           socklen;
+    struct sockaddr *sockaddr;         /* 获取的LB服务器地址 */
+    socklen_t  socklen;
 
-    ngx_str_t                          *host;
-    in_port_t                           port;
+    ngx_str_t  *host;
+    in_port_t  port;
 
-    int                                 last_peer_state;
+    int        last_peer_state;
 
 #if !(HAVE_NGX_UPSTREAM_TIMEOUT_FIELDS)
-    unsigned                            cloned_upstream_conf;  /* :1 */
+    unsigned   cloned_upstream_conf;  /* :1 */
 #endif
 };
 
@@ -54,7 +54,7 @@ static ngx_int_t ngx_http_lua_balancer_get_peer(ngx_peer_connection_t *pc,
     void *data);
 static ngx_int_t ngx_http_lua_balancer_by_chunk(lua_State *L,
     ngx_http_request_t *r);
-void ngx_http_lua_balancer_free_peer(ngx_peer_connection_t *pc, void *data,
+ void ngx_http_lua_balancer_free_peer(ngx_peer_connection_t *pc, void *data,
     ngx_uint_t state);
 
 
@@ -118,7 +118,7 @@ ngx_http_lua_balancer_by_lua_block(ngx_conf_t *cf, ngx_command_t *cmd,
     return rv;
 }
 
-
+/* 配置指令“balancer_by_lua_file xxx”解析入口函数 */
 char *
 ngx_http_lua_balancer_by_lua(ngx_conf_t *cf, ngx_command_t *cmd,
     void *conf)
@@ -225,17 +225,18 @@ ngx_http_lua_balancer_init_peer(ngx_http_request_t *r,
     ngx_http_lua_srv_conf_t            *bcf;
     ngx_http_lua_balancer_peer_data_t  *bp;
 
+    /* 对应RR算法初始化，方便默认情形退化为round robin算法 */
     bp = ngx_pcalloc(r->pool, sizeof(ngx_http_lua_balancer_peer_data_t));
     if (bp == NULL) {
         return NGX_ERROR;
     }
 
     r->upstream->peer.data = &bp->rrp;
-
     if (ngx_http_upstream_init_round_robin_peer(r, us) != NGX_OK) {
         return NGX_ERROR;
     }
 
+    /* 设置对应的获取服务器函数 */
     r->upstream->peer.get = ngx_http_lua_balancer_get_peer;
     r->upstream->peer.free = ngx_http_lua_balancer_free_peer;
 
@@ -268,13 +269,11 @@ ngx_http_lua_balancer_get_peer(ngx_peer_connection_t *pc, void *data)
                    "lua balancer peer, tries: %ui", pc->tries);
 
     lscf = bp->conf;
-
     r = bp->request;
 
     ngx_http_lua_assert(lscf->balancer.handler && r);
-
+    /* 获取执行的虚拟机 */
     ctx = ngx_http_get_module_ctx(r, ngx_http_lua_module);
-
     if (ctx == NULL) {
         ctx = ngx_http_lua_create_ctx(r);
         if (ctx == NULL) {
@@ -290,8 +289,10 @@ ngx_http_lua_balancer_get_peer(ngx_peer_connection_t *pc, void *data)
         ngx_http_lua_reset_ctx(r, L, ctx);
     }
 
+    /* 设定Lua代码执行阶段 */
     ctx->context = NGX_HTTP_LUA_CONTEXT_BALANCER;
 
+    /* 初始化 */
     bp->sockaddr = NULL;
     bp->socklen = 0;
     bp->more_tries = 0;
@@ -302,11 +303,11 @@ ngx_http_lua_balancer_get_peer(ngx_peer_connection_t *pc, void *data)
     /* balancer_by_lua does not support yielding and
      * there cannot be any conflicts among concurrent requests,
      * thus it is safe to store the peer data in the main conf.
-     */
+     *//* 保存到主配置，以便于在执行脚本中通过ngx.balancer.set_current_peer()赋值 */
     lmcf->balancer_peer_data = bp;
 
+    /* 调用=ngx_http_lua_balancer_handler_file() */
     rc = lscf->balancer.handler(r, lscf, L);
-
     if (rc == NGX_ERROR) {
         return NGX_ERROR;
     }
@@ -322,6 +323,7 @@ ngx_http_lua_balancer_get_peer(ngx_peer_connection_t *pc, void *data)
         }
     }
 
+    /* 已经获取到了服务器IP地址，通过ngx.balancer.set_current_peer()赋值 */
     if (bp->sockaddr && bp->socklen) {
         pc->sockaddr = bp->sockaddr;
         pc->socklen = bp->socklen;
@@ -340,10 +342,11 @@ ngx_http_lua_balancer_get_peer(ngx_peer_connection_t *pc, void *data)
         return NGX_OK;
     }
 
+    /* 未获取到IP地址，则退化为RR算法 */
     return ngx_http_upstream_get_round_robin_peer(pc, &bp->rrp);
 }
 
-
+/* 配置指令“balancer_by_lua_file xxx”的执行函数 */
 static ngx_int_t
 ngx_http_lua_balancer_by_chunk(lua_State *L, ngx_http_request_t *r)
 {
@@ -351,8 +354,10 @@ ngx_http_lua_balancer_by_chunk(lua_State *L, ngx_http_request_t *r)
     size_t                   len;
     ngx_int_t                rc;
 
-    /* init nginx context in Lua VM */
+    /* 记录请求，init nginx context in Lua VM */
     ngx_http_lua_set_req(L, r);
+    
+    /* 创建临时全局表，用于此脚本的执行；其元表索引外围的_G */
     ngx_http_lua_create_new_globals_table(L, 0 /* narr */, 1 /* nrec */);
 
     /*  {{{ make new env inheriting main thread's globals table */
@@ -367,13 +372,12 @@ ngx_http_lua_balancer_by_chunk(lua_State *L, ngx_http_request_t *r)
     lua_pushcfunction(L, ngx_http_lua_traceback);
     lua_insert(L, 1);  /* put it under chunk and args */
 
-    /*  protected call user code */
+    /* 执行脚本，protected call user code */
     rc = lua_pcall(L, 0, 1, 1);
 
     lua_remove(L, 1);  /* remove traceback function */
 
     dd("rc == %d", (int) rc);
-
     if (rc != 0) {
         /*  error occurred when running loaded code */
         err_msg = (u_char *) lua_tolstring(L, -1, &len);
@@ -391,6 +395,7 @@ ngx_http_lua_balancer_by_chunk(lua_State *L, ngx_http_request_t *r)
         return NGX_ERROR;
     }
 
+    /* 清理临时表 */
     lua_settop(L, 0); /*  clear remaining elems on stack */
     return rc;
 }
@@ -455,7 +460,8 @@ ngx_http_lua_balancer_save_session(ngx_peer_connection_t *pc, void *data)
 
 
 #ifndef NGX_LUA_NO_FFI_API
-
+/* 被ngx.balancer.set_current_peer()接口调用，设置自定义脚本选中的负载
+   均衡器 */
 int
 ngx_http_lua_ffi_balancer_set_current_peer(ngx_http_request_t *r,
     const u_char *addr, size_t addr_len, int port, char **err)
@@ -495,7 +501,7 @@ ngx_http_lua_ffi_balancer_set_current_peer(ngx_http_request_t *r,
     /* we cannot read r->upstream->peer.data here directly because
      * it could be overridden by other modules like
      * ngx_http_upstream_keepalive_module.
-     */
+     *//* 获取对应的负载均衡记录数据 */
     bp = lmcf->balancer_peer_data;
     if (bp == NULL) {
         *err = "no upstream peer data found";
@@ -504,6 +510,7 @@ ngx_http_lua_ffi_balancer_set_current_peer(ngx_http_request_t *r,
 
     ngx_memzero(&url, sizeof(ngx_url_t));
 
+    /* 赋值，记录选择的IP、PORT */
     url.url.data = ngx_palloc(r->pool, addr_len);
     if (url.url.data == NULL) {
         *err = "no memory";
@@ -511,12 +518,10 @@ ngx_http_lua_ffi_balancer_set_current_peer(ngx_http_request_t *r,
     }
 
     ngx_memcpy(url.url.data, addr, addr_len);
-
     url.url.len = addr_len;
     url.default_port = (in_port_t) port;
     url.uri_part = 0;
     url.no_resolve = 1;
-
     if (ngx_parse_url(r->pool, &url) != NGX_OK) {
         if (url.err) {
             *err = url.err;

@@ -197,7 +197,7 @@ struct ngx_shm_zone_s {
     ngx_http_lua_main_conf_handler_pt init_worker_handler;
     ngx_str_t init_worker_src;/* 对应配置指令“init_worker_by_lua_file”, ngx_http_lua_init_worker_by_file() */
  
-    ngx_http_lua_balancer_peer_data_t      *balancer_peer_data;
+    ngx_http_lua_balancer_peer_data_t  *balancer_peer_data;
                     /* balancer_by_lua does not support yielding and
                      * there cannot be any conflicts among concurrent requests,
                      * thus it is safe to store the peer data in the main conf.
