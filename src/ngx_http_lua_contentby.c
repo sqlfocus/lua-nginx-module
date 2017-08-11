@@ -178,7 +178,7 @@ ngx_http_lua_content_handler(ngx_http_request_t *r)
 
     /* 查找location配置信息 */
     llcf = ngx_http_get_module_loc_conf(r, ngx_http_lua_module);
-    if (llcf->content_handler == NULL) {
+    if (llcf->content_handler == NULL) {  /* =ngx_http_lua_content_handler_file() */
         dd("no content handler found");
         return NGX_DECLINED;
     }

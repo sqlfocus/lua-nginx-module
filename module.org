@@ -384,6 +384,29 @@ openresty实现了非阻塞的原生态插口结构ngx.socket，兼容LuaSocket�
     -ngx_http_lua_run_thread()         启动Lua虚拟机
 #+END_EXAMPLE
 
+* 封装的coroutine.yield/resume()
+openresty在构建Lua虚拟机阶段重新设计了coroutine的执行函数，包括yeild/resume，
+用于nginx_lua环境(除NGX_HTTP_LUA_CONTEXT_HEADER_FILTER/NGX_HTTP_LUA_CONTEXT_BODY_FILTER外，
+此时使用原生态库函数)
+
+从包装函数可知，ngx_lua下的协程依赖HTTP环境，如HTTP请求、链接等数据结构；
+另外，新创建的协程都派生自根Lua，而非创建的协程，这样yield()后使得控制权
+返还给根Lua
+
+#+BEGIN_EXAMPLE
+-ngx_http_lua_init()                             创建Lua虚拟机, ~/src/ngx_http_lua_module.c
+  -ngx_http_lua_init_vm()
+    -ngx_http_lua_new_state()
+      -ngx_http_lua_init_globals()
+        -ngx_http_lua_inject_ngx_api()
+          -ngx_http_lua_inject_coroutine_api()   注册coroutine.resume/yield()函数
+                                                 ~/src/ngx_http_lua_coroutine.c
+            -coroutine.create()     ngx_http_lua_coroutine_create()
+            -coroutine.resume()     ngx_http_lua_coroutine_resume()
+            -coroutine.yield()      ngx_http_lua_coroutine_yield()
+            -coroutine.status()     ngx_http_lua_coroutine_status()
+#+END_EXAMPLE
+
 * 参考
   - [[https://github.com/sqlfocus/nginx][nginx代码导读]]
 

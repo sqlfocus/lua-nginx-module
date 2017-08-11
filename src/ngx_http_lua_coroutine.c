@@ -41,7 +41,7 @@ static const ngx_str_t
     };
 
 
-
+/* 包装后的coroutine.create(f) */
 static int
 ngx_http_lua_coroutine_create(lua_State *L)
 {
@@ -70,9 +70,11 @@ ngx_http_lua_coroutine_create_helper(lua_State *L, ngx_http_request_t *r,
     lua_State                     *co;  /* new coroutine to be created */
     ngx_http_lua_co_ctx_t         *coctx; /* co ctx for the new coroutine */
 
+    /* 有一个参数，为Lua脚本块儿 */
     luaL_argcheck(L, lua_isfunction(L, 1) && !lua_iscfunction(L, 1), 1,
                   "Lua function expected");
 
+    /* 只允许特定环境创建协程 */
     ngx_http_lua_check_context(L, ctx, NGX_HTTP_LUA_CONTEXT_REWRITE
                                | NGX_HTTP_LUA_CONTEXT_ACCESS
                                | NGX_HTTP_LUA_CONTEXT_CONTENT
@@ -84,11 +86,13 @@ ngx_http_lua_coroutine_create_helper(lua_State *L, ngx_http_request_t *r,
 
     /* create new coroutine on root Lua state, so it always yields
      * to main Lua thread
-     */
+     *//* 创建新协程，因为在根Lua上创建，因此它总能yield到根Lua */
     co = lua_newthread(vm);
 
+    /*** DTRACE ***/
     ngx_http_lua_probe_user_coroutine_create(r, L, co);
 
+    /* 创建协程上下文 */
     coctx = ngx_http_lua_get_co_ctx(co, ctx);
     if (coctx == NULL) {
         coctx = ngx_http_lua_create_co_ctx(r, ctx);
@@ -106,12 +110,15 @@ ngx_http_lua_coroutine_create_helper(lua_State *L, ngx_http_request_t *r,
 
     /* make new coroutine share globals of the parent coroutine.
      * NOTE: globals don't have to be separated! */
+    /* 新协程与父协程共享全局环境 */
     ngx_http_lua_get_globals_table(L);
     lua_xmove(L, co, 1);
     ngx_http_lua_set_globals_table(co);
 
+    /* 移动协程结构，从根Lua到当前父Lua */
     lua_xmove(vm, L, 1);    /* move coroutine from main thread to L */
 
+    /* 移动Lua执行块儿到新建的协程 */
     lua_pushvalue(L, 1);    /* copy entry function to top of L*/
     lua_xmove(L, co, 1);    /* move entry function from L to co */
 
@@ -136,15 +143,15 @@ ngx_http_lua_coroutine_resume(lua_State *L)
     ngx_http_lua_co_ctx_t       *coctx;
     ngx_http_lua_co_ctx_t       *p_coctx; /* parent co ctx */
 
+    /* 获取需要resume的协程结构 */
     co = lua_tothread(L, 1);
-
     luaL_argcheck(L, co, 1, "coroutine expected");
 
+    /* 参数检查 */
     r = ngx_http_lua_get_req(L);
     if (r == NULL) {
         return luaL_error(L, "no request found");
     }
-
     ctx = ngx_http_get_module_ctx(r, ngx_http_lua_module);
     if (ctx == NULL) {
         return luaL_error(L, "no request ctx found");
@@ -178,18 +185,23 @@ ngx_http_lua_coroutine_resume(lua_State *L)
         return 2;
     }
 
+    /* 设置父Lua状态 */
     p_coctx->co_status = NGX_HTTP_LUA_CO_NORMAL;
 
+    /* 关联父子Lua */
     coctx->parent_co_ctx = p_coctx;
 
+    /* 设置当前Lua为运行状态 */
     dd("set coroutine to running");
     coctx->co_status = NGX_HTTP_LUA_CO_RUNNING;
 
+    /* 设置Lua操作动作 */
     ctx->co_op = NGX_HTTP_LUA_USER_CORO_RESUME;
+    /* 设置运行环境指向待resume的Lua */
     ctx->cur_co_ctx = coctx;
 
-    /* yield and pass args to main thread, and resume target coroutine from
-     * there */
+    /* 父Lua主动交出CPU，由主线程调度子Lua恢复
+       yield and pass args to main thread, and resume target coroutine from there */
     return lua_yield(L, lua_gettop(L) - 1);
 }
 
@@ -218,12 +230,14 @@ ngx_http_lua_coroutine_yield(lua_State *L)
                                | NGX_HTTP_LUA_CONTEXT_SSL_CERT
                                | NGX_HTTP_LUA_CONTEXT_SSL_SESS_FETCH);
 
+    /* 设置状态 */
     coctx = ctx->cur_co_ctx;
-
     coctx->co_status = NGX_HTTP_LUA_CO_SUSPENDED;
 
+    /* 设置执行动作 */
     ctx->co_op = NGX_HTTP_LUA_USER_CORO_YIELD;
 
+    /* 启动父Lua */
     if (!coctx->is_uthread && coctx->parent_co_ctx) {
         dd("set coroutine to running");
         coctx->parent_co_ctx->co_status = NGX_HTTP_LUA_CO_RUNNING;
@@ -234,12 +248,12 @@ ngx_http_lua_coroutine_yield(lua_State *L)
         ngx_http_lua_probe_user_coroutine_yield(r, NULL, L);
     }
 
-    /* yield and pass retvals to main thread,
+    /* 让出CPU，yield and pass retvals to main thread,
      * and resume parent coroutine there */
     return lua_yield(L, lua_gettop(L));
 }
 
-
+/* 注册包装后的coroutine.resume/yield() */
 void
 ngx_http_lua_inject_coroutine_api(ngx_log_t *log, lua_State *L)
 {

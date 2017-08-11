@@ -434,7 +434,7 @@ typedef struct ngx_http_lua_ctx_s {
     ngx_http_lua_co_ctx_t *cur_co_ctx; /* 当前协程的执行环境，初始化为&entry_co_ctx */
 
     /* FIXME: we should use rbtree here to prevent O(n) lookup overhead */
-    ngx_list_t              *user_co_ctx;     /* coroutine contexts for user
+    ngx_list_t *user_co_ctx;           /* coroutine contexts for user
                                                  coroutines */
 
     ngx_http_lua_co_ctx_t entry_co_ctx;/* 入口协程执行环境，coroutine context 
