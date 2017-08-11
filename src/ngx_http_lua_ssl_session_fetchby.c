@@ -49,6 +49,7 @@ ngx_http_lua_ssl_sess_fetch_handler_file(ngx_http_request_t *r,
     /*  make sure we have a valid code chunk */
     ngx_http_lua_assert(lua_isfunction(L, -1));
 
+    /* 使用ngx.ssl.session获取对应的会话, ngx_http_lua_ffi_ssl_get_session_id() */
     return ngx_http_lua_ssl_sess_fetch_by_chunk(L, r);
 }
 
@@ -304,7 +305,7 @@ ngx_http_lua_ssl_sess_fetch_handler(ngx_ssl_conn_t *ssl_conn, u_char *id,
     L = ngx_http_lua_get_lua_vm(r, NULL);
 
     c->log->action = "fetching SSL session by lua";
-
+    /* =ngx_http_lua_ssl_sess_fetch_handler_file() */
     rc = lscf->srv.ssl_sess_fetch_handler(r, lscf, L);
 
     if (rc >= NGX_OK || rc == NGX_ERROR) {

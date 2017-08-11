@@ -948,7 +948,8 @@ ngx_http_lua_merge_srv_conf(ngx_conf_t *cf, void *parent, void *child)
 #else
 
 #   if OPENSSL_VERSION_NUMBER >= 0x1000205fL
-        /* 设置处理句柄 */
+        /* 设置处理句柄；arg3将做为注册函数的arg2回传；
+           注册为openssl SSL_CTX->cert->cert_cb() */
         SSL_CTX_set_cert_cb(sscf->ssl.ctx, ngx_http_lua_ssl_cert_handler, NULL);
 #   else
         ngx_log_error(NGX_LOG_EMERG, cf->log, 0,

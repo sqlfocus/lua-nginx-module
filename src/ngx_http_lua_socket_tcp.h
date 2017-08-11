@@ -56,7 +56,8 @@ struct ngx_http_lua_socket_tcp_upstream_s {
     ngx_http_lua_socket_tcp_retval_handler  read_prepare_retvals;
                               /* receive: ngx_http_lua_socket_tcp_receive_retval_handler() */
     ngx_http_lua_socket_tcp_retval_handler  write_prepare_retvals;
-                              /* connect: ngx_http_lua_socket_tcp_conn_retval_handler() */
+                              /* connect: ngx_http_lua_socket_tcp_conn_retval_handler()
+                                 sslhandshake: ngx_http_lua_ssl_handshake_retval_handler() */
     ngx_http_lua_socket_tcp_upstream_handler_pt read_event_handler;
     ngx_http_lua_socket_tcp_upstream_handler_pt write_event_handler;
 
@@ -98,7 +99,7 @@ struct ngx_http_lua_socket_tcp_upstream_s {
     ngx_uint_t reused;
 
 #if (NGX_HTTP_SSL)
-    ngx_str_t ssl_name;
+    ngx_str_t ssl_name;          /* 指定需要连接的服务器名，以应对单IP提供多SSL服务的情况 */
 #endif
 
     unsigned ft_type:16;
@@ -112,8 +113,8 @@ struct ngx_http_lua_socket_tcp_upstream_s {
     unsigned read_closed:1;
     unsigned write_closed:1;
 #if (NGX_HTTP_SSL)
-    unsigned ssl_verify:1;
-    unsigned ssl_session_reuse:1;
+    unsigned ssl_verify:1;       /* 是否验证服务器端证书 */
+    unsigned ssl_session_reuse:1;/* 是否开启会话恢复机制 */
 #endif
 };
 

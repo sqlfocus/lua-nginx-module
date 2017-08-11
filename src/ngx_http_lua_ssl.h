@@ -13,23 +13,20 @@
 
 #if (NGX_HTTP_SSL)
 typedef struct {
-    ngx_connection_t        *connection; /* original true connection */
-    ngx_http_request_t      *request;    /* fake request */
-    ngx_pool_cleanup_pt     *cleanup;
+    ngx_connection_t *connection; /* original true connection */
+    ngx_http_request_t *request;  /* fake request */
+    ngx_pool_cleanup_pt *cleanup;
 
-    ngx_ssl_session_t       *session;    /* retrurn value for openssl's
-                                          * session_get_cb */
+    ngx_ssl_session_t *session;   /* retrurn value for openssl's session_get_cb */
+    ngx_str_t session_id;         /* 对应->session->session_id */
 
-    ngx_str_t                session_id;
+    int  exit_code;  /* exit code for openssl's set_cert_cb callback */
 
-    int                      exit_code;  /* exit code for openssl's
-                                            set_cert_cb callback */
+    unsigned done:1;    /**/
+    unsigned aborted:1; /**/
 
-    unsigned                 done:1;
-    unsigned                 aborted:1;
-
-    unsigned                 entered_cert_handler:1;
-    unsigned                 entered_sess_fetch_handler:1;
+    unsigned entered_cert_handler:1;       /* 调用函数 ngx_http_lua_ssl_cert_handler() */
+    unsigned entered_sess_fetch_handler:1;
 } ngx_http_lua_ssl_ctx_t;
 #endif
 

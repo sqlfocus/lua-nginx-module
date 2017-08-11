@@ -47,6 +47,7 @@ ngx_http_lua_ssl_sess_store_handler_file(ngx_http_request_t *r,
     /*  make sure we have a valid code chunk */
     ngx_http_lua_assert(lua_isfunction(L, -1));
 
+    /* 通过ngx.ssl.session获取对应的会话, ngx_http_lua_ffi_ssl_get_session_id() */
     return ngx_http_lua_ssl_sess_store_by_chunk(L, r);
 }
 
@@ -238,7 +239,7 @@ ngx_http_lua_ssl_sess_store_handler(ngx_ssl_conn_t *ssl_conn,
     }
 
 #endif
-
+    /* 创建上下文环境，并记录待保存的会话 */
     if (cctx == NULL) {
         cctx = ngx_pcalloc(c->pool, sizeof(ngx_http_lua_ssl_ctx_t));
         if (cctx == NULL) {
@@ -268,7 +269,7 @@ ngx_http_lua_ssl_sess_store_handler(ngx_ssl_conn_t *ssl_conn,
     L = ngx_http_lua_get_lua_vm(r, NULL);
 
     c->log->action = "storing SSL session by lua";
-
+    /* = ngx_http_lua_ssl_sess_store_handler_file() */
     rc = lscf->srv.ssl_sess_store_handler(r, lscf, L);
 
     if (rc >= NGX_OK || rc == NGX_ERROR) {

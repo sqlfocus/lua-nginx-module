@@ -38,6 +38,7 @@ static ngx_int_t ngx_http_lua_ssl_cert_by_chunk(lua_State *L,
     ngx_http_request_t *r);
 
 
+/* 配置指令“ssl_certificate_by_lua_file”的执行句柄 */
 ngx_int_t
 ngx_http_lua_ssl_cert_handler_file(ngx_http_request_t *r,
     ngx_http_lua_srv_conf_t *lscf, lua_State *L)
@@ -98,7 +99,7 @@ ngx_http_lua_ssl_cert_by_lua_block(ngx_conf_t *cf, ngx_command_t *cmd,
     return rv;
 }
 
-
+/* 对应配置指令“ssl_certificate_by_lua_file” */
 char *
 ngx_http_lua_ssl_cert_by_lua(ngx_conf_t *cf, ngx_command_t *cmd,
     void *conf)
@@ -127,14 +128,17 @@ ngx_http_lua_ssl_cert_by_lua(ngx_conf_t *cf, ngx_command_t *cmd,
         return "is duplicate";
     }
 
-"lua_use_default_type"    if (ngx_http_lua_ssl_init(cf->log) != NGX_OK) {
+    /* 获取SSL环境新索引 ngx_http_lua_ssl_ctx_index */
+    if (ngx_http_lua_ssl_init(cf->log) != NGX_OK) {
         return NGX_CONF_ERROR;
     }
 
     value = cf->args->elts;
 
+    /* 设置处理函数 ngx_http_lua_ssl_cert_handler_file() */
     lscf->srv.ssl_cert_handler = (ngx_http_lua_srv_conf_handler_pt) cmd->post;
 
+    /* 获取配置的文件全路径名并保存 */
     if (cmd->post == ngx_http_lua_ssl_cert_handler_file) {
         /* Lua code in an external file */
 
@@ -157,7 +161,6 @@ ngx_http_lua_ssl_cert_by_lua(ngx_conf_t *cf, ngx_command_t *cmd,
         p = ngx_copy(p, NGX_HTTP_LUA_FILE_TAG, NGX_HTTP_LUA_FILE_TAG_LEN);
         p = ngx_http_lua_digest_hex(p, value[1].data, value[1].len);
         *p = '\0';
-
     } else {
         /* inlined Lua code */
 
@@ -180,7 +183,12 @@ ngx_http_lua_ssl_cert_by_lua(ngx_conf_t *cf, ngx_command_t *cmd,
 #endif  /* OPENSSL_VERSION_NUMBER < 0x1000205fL */
 }
 
-/* 配置指令"ssl_certificate_by_lua_file xxx"的处理句柄 */
+/* 配置指令"ssl_certificate_by_lua_file xxx"的处理句柄
+   <NOTE>参数data=NULL, 因为注册时指定为NULL */
+/* 被SSL_CTX_set_cert_cb()注册为SSL_CTX->cert->cert_cb(), 手动指定证书链及私钥
+   <NOTE>调用流程
+     -tls_post_process_client_hello()       服务器端处理ClientHello报文，${openssl-src-path}/ssl/statem/statem_srvr.c
+       -SSL->cert->cert_cb() */
 int
 ngx_http_lua_ssl_cert_handler(ngx_ssl_conn_t *ssl_conn, void *data)
 {
@@ -194,10 +202,9 @@ ngx_http_lua_ssl_cert_handler(ngx_ssl_conn_t *ssl_conn, void *data)
     ngx_http_core_loc_conf_t        *clcf;
     ngx_http_lua_ssl_ctx_t          *cctx;
 
+    /* 获取对应的底层链路 */
     c = ngx_ssl_get_connection(ssl_conn);
-
     dd("c = %p", c);
-
     cctx = ngx_http_lua_ssl_get_ctx(c->ssl->connection);
 
     dd("ssl cert handler, cert-ctx=%p", cctx);
@@ -219,8 +226,11 @@ ngx_http_lua_ssl_cert_handler(ngx_ssl_conn_t *ssl_conn, void *data)
 
     dd("first time");
 
+    /* TCP连接建立后，接收到HTTP请求前 ngx_http_connection_t; 
+       接收到http请求后 ngx_http_request_t */
     hc = c->data;
 
+    /* 由于脚本执行，需要HTTP请求环境，因此建立虚拟请求 */
     fc = ngx_http_lua_create_fake_connection(NULL);
     if (fc == NULL) {
         goto failed;
@@ -269,6 +279,7 @@ ngx_http_lua_ssl_cert_handler(ngx_ssl_conn_t *ssl_conn, void *data)
 
 #endif
 
+    /* 建立执行上下文 */
     if (cctx == NULL) {
         cctx = ngx_pcalloc(c->pool, sizeof(ngx_http_lua_ssl_ctx_t));
         if (cctx == NULL) {
@@ -284,6 +295,7 @@ ngx_http_lua_ssl_cert_handler(ngx_ssl_conn_t *ssl_conn, void *data)
 
     dd("setting cctx");
 
+    /* 保存到SSL对象 */
     if (SSL_set_ex_data(c->ssl->connection, ngx_http_lua_ssl_ctx_index, cctx)
         == 0)
     {
@@ -298,8 +310,9 @@ ngx_http_lua_ssl_cert_handler(ngx_ssl_conn_t *ssl_conn, void *data)
 
     c->log->action = "loading SSL certificate by lua";
 
+    /* 启动配置指令“ssl_certificate_by_lua_file”脚本，
+       =ngx_http_lua_ssl_cert_handler_file() */
     rc = lscf->srv.ssl_cert_handler(r, lscf, L);
-
     if (rc >= NGX_OK || rc == NGX_ERROR) {
         cctx->done = 1;
 
@@ -315,8 +328,7 @@ ngx_http_lua_ssl_cert_handler(ngx_ssl_conn_t *ssl_conn, void *data)
         return cctx->exit_code;
     }
 
-    /* rc == NGX_DONE */
-
+    /* 正执行ing，rc == NGX_DONE */
     cln = ngx_pool_cleanup_add(fc->pool, 0);
     if (cln == NULL) {
         goto failed;
@@ -438,7 +450,7 @@ ngx_http_lua_log_ssl_cert_error(ngx_log_t *log, u_char *buf, size_t len)
     return buf;
 }
 
-
+/* 配置指令“ssl_certificate_by_lua_file”对应的脚本编译后的执行函数 */
 static ngx_int_t
 ngx_http_lua_ssl_cert_by_chunk(lua_State *L, ngx_http_request_t *r)
 {
@@ -448,24 +460,23 @@ ngx_http_lua_ssl_cert_by_chunk(lua_State *L, ngx_http_request_t *r)
     ngx_http_lua_ctx_t      *ctx;
     ngx_http_cleanup_t      *cln;
 
+    /* 如有必要创建Lua虚拟机环境 */
     ctx = ngx_http_get_module_ctx(r, ngx_http_lua_module);
-
     if (ctx == NULL) {
         ctx = ngx_http_lua_create_ctx(r);
         if (ctx == NULL) {
             return NGX_HTTP_INTERNAL_SERVER_ERROR;
         }
-
     } else {
         dd("reset ctx");
         ngx_http_lua_reset_ctx(r, L, ctx);
     }
 
+    /* 设置内容处理？？？ */
     ctx->entered_content_phase = 1;
 
-    /*  {{{ new coroutine to handle request */
+    /* 创建新协程 {{{ new coroutine to handle request */
     co = ngx_http_lua_new_thread(r, L, &co_ref);
-
     if (co == NULL) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                       "lua: failed to create new coroutine to handle request");
@@ -473,16 +484,20 @@ ngx_http_lua_ssl_cert_by_chunk(lua_State *L, ngx_http_request_t *r)
         return NGX_HTTP_INTERNAL_SERVER_ERROR;
     }
 
-    /*  move code closure to new coroutine */
+    /* 移动编译后待执行的代码块儿到新协程栈
+       move code closure to new coroutine */
     lua_xmove(L, co, 1);
 
-    /*  set closure's env table to new coroutine's globals table */
+    /* 设置代码块儿的执行环境为新协程的_G表
+       set closure's env table to new coroutine's globals table */
     ngx_http_lua_get_globals_table(co);
     lua_setfenv(co, -2);
 
-    /* save nginx request in coroutine globals table */
+    /* 记录请求到全局变量_G["__ngx_req"]
+       save nginx request in coroutine globals table */
     ngx_http_lua_set_req(co, r);
 
+    /* 记录协程信息 */
     ctx->cur_co_ctx = &ctx->entry_co_ctx;
     ctx->cur_co_ctx->co = co;
     ctx->cur_co_ctx->co_ref = co_ref;
@@ -490,7 +505,7 @@ ngx_http_lua_ssl_cert_by_chunk(lua_State *L, ngx_http_request_t *r)
     ctx->cur_co_ctx->co_top = 1;
 #endif
 
-    /* register request cleanup hooks */
+    /* 注册清理句柄，register request cleanup hooks */
     if (ctx->cleanup == NULL) {
         cln = ngx_http_cleanup_add(r, 0);
         if (cln == NULL) {
@@ -502,10 +517,13 @@ ngx_http_lua_ssl_cert_by_chunk(lua_State *L, ngx_http_request_t *r)
         ctx->cleanup = &cln->handler;
     }
 
+    /* 设置当前阶段 */
     ctx->context = NGX_HTTP_LUA_CONTEXT_SSL_CERT;
 
+    /* 运行新建协程，执行配置脚本 */
     rc = ngx_http_lua_run_thread(L, r, ctx, 0);
 
+    /* 返回值处理 */
     if (rc == NGX_ERROR || rc >= NGX_OK) {
         /* do nothing */
 
@@ -519,6 +537,7 @@ ngx_http_lua_ssl_cert_by_chunk(lua_State *L, ngx_http_request_t *r)
         rc = NGX_OK;
     }
 
+    /* 结束处理 */
     ngx_http_lua_finalize_request(r, rc);
     return rc;
 }

@@ -255,13 +255,68 @@ ngx.balancer模块儿并没有随ngx_lua发布，而是放置在lua-resty-core�
     -赋值->sockaddr/socklen/host
 #+END_EXAMPLE
 
-* TODO SSL
-ssl_certificate_by_lua_file
-   ngx_http_lua_ssl_cert_handler()  ~/src/ngx_http_lua_ssl_certby.c
-ssl_session_fetch_by_lua_file
-   ngx_http_lua_ssl_sess_fetch_handler()
-ssl_session_store_by_lua_file
-   ngx_http_lua_ssl_sess_store_handler()
+* SSL
+openresty暴露了七层代理downstream的SSL处理流程，并且cosocket也支持SSL握手；
+暴露的downstream的处理流程是通过openssl回调实现的。
+
+#+BEGIN_EXAMPLE
+配置解析流程
+-main()
+  -ngx_init_cycle()
+    -ngx_conf_parse()                         配置文件解析入口
+      -ngx_conf_read_token()                  读取关键字
+      -ngx_conf_handler()                     处理关键字
+        -ngx_conf_t->cycle->modules[i]->commands->set()
+        -->ngx_http_block()                   http{}处理入口
+          -->ngx_http_core_server()             server{}处理入口
+          -->ngx_http_core_location()           location{}处理入口
+            -ngx_http_lua_ssl_cert_by_lua()         配置指令"ssl_certificate_by_lua_file"
+            -ngx_http_lua_ssl_sess_store_by_lua()   配置指令"ssl_session_store_by_lua_file"
+            -ngx_http_lua_ssl_sess_fetch_by_lua()   配置指令"ssl_session_fetch_by_lua_file"
+            -...
+          -ngx_http_module_t->init_main_conf()
+          -ngx_http_merge_servers()             
+            -->ngx_http_lua_merge_srv_conf()    设置downstream SSL控制句柄，对应配置指令ssl_..._by_lua_file
+              -SSL_CTX_set_cert_cb()                设置“ssl_certificate_by_lua_file”处理句柄
+                                                         ngx_http_lua_ssl_cert_handler()
+              -SSL_CTX_sess_set_new_cb()            设置“ssl_session_store_by_lua_file”句柄
+                                                         ngx_http_lua_ssl_sess_store_handler()
+              -SSL_CTX_sess_set_get_cb()            设置“ssl_session_fetch_by_lua_file”句柄
+                                                         ngx_http_lua_ssl_sess_fetch_handler()
+            -->ngx_http_lua_merge_loc_conf()    创建用于cosocket的SSL环境
+              -ngx_http_lua_set_ssl()    
+#+END_EXAMPLE
+
+** ssl_certificate_by_lua_file
+此函数在七层downstream SSL握手之前执行，以便于用户每请求设置对应的公钥证书、私
+钥等；也可用用于SSL握手的流量控制。
+
+#+BEGIN_EXAMPLE
+-ngx_http_lua_ssl_cert_handler()              ~/src/ngx_http_lua_ssl_certby.c
+  -构建HTTP请求
+  -SSL_set_ex_data()                          构建并保存执行上下文
+  -ngx_http_lua_get_lua_vm()                  查找Lua虚拟机
+  -ngx_http_lua_ssl_cert_handler_file()
+  -ngx_http_lua_srv_conf_t->srv.ssl_cert_handler()
+  -->ngx_http_lua_ssl_cert_by_chunk()
+    -ngx_http_lua_new_thread()                创建新协程
+    -ngx_http_lua_run_thread()                执行编译后的代码
+    -ngx_http_lua_finalize_request()          结束处理
+#+END_EXAMPLE
+
+** cosocket SSL
+在Lua层面通过 =tcpsock:sslhandshake()= 发起SSL握手协商
+
+#+BEGIN_EXAMPLE
+-ngx_http_lua_socket_tcp_sslhandshake()       ~/src/ngx_http_lua_socket_tcp.c
+  -ngx_ssl_create_connection()                创建SSL对象
+  -解析参数
+  -ngx_ssl_handshake()                        启动握手
+  -ngx_http_lua_ssl_handshake_handler()       握手成功后，通知Lua接口
+    -ngx_http_lua_ssl_handshake_retval_handler()
+      -lua_newuserdata()
+      -ngx_ssl_get_session()                  返回协商成功的会话信息
+#+END_EXAMPLE
 
 * cosocket
 openresty实现了非阻塞的原生态插口结构ngx.socket，兼容LuaSocket库；并且

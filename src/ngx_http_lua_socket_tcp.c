@@ -188,7 +188,7 @@ static char ngx_http_lua_downstream_udata_metatable_key;
 static char ngx_http_lua_pool_udata_metatable_key;
 static char ngx_http_lua_pattern_udata_metatable_key;
 #if (NGX_HTTP_SSL)
-static char ngx_http_lua_ssl_session_metatable_key;
+static char ngx_http_lua_ssl_session_metatable_key;      /* cosocket SSL会话元表 */
 #endif
 
 
@@ -1164,7 +1164,8 @@ ngx_http_lua_socket_conn_error_retval_handler(ngx_http_request_t *r,
 
 
 #if (NGX_HTTP_SSL)
-
+/* 对应tcpsock:sslhandshake() Lua接口，语法如下：
+   session, err = tcpsock:sslhandshake(reused_session?, server_name?, ssl_verify?, send_status_req?) */
 static int
 ngx_http_lua_socket_tcp_sslhandshake(lua_State *L)
 {
@@ -1180,7 +1181,6 @@ ngx_http_lua_socket_tcp_sslhandshake(lua_State *L)
     ngx_http_lua_socket_tcp_upstream_t  *u;
 
     /* Lua function arguments: self [,session] [,host] [,verify] */
-
     n = lua_gettop(L);
     if (n < 1 || n > 5) {
         return luaL_error(L, "ngx.socket connect: expecting 1 ~ 5 "
@@ -1194,12 +1194,10 @@ ngx_http_lua_socket_tcp_sslhandshake(lua_State *L)
 
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                    "lua tcp socket ssl handshake");
-
     luaL_checktype(L, 1, LUA_TTABLE);
 
     lua_rawgeti(L, 1, SOCKET_CTX_INDEX);
     u = lua_touserdata(L, -1);
-
     if (u == NULL
         || u->peer.connection == NULL
         || u->read_closed
@@ -1225,9 +1223,9 @@ ngx_http_lua_socket_tcp_sslhandshake(lua_State *L)
     }
 
     c = u->peer.connection;
+    u->ssl_session_reuse = 1;            /* 默认开启会话恢复机制 */
 
-    u->ssl_session_reuse = 1;
-
+    /* 已经完成握手!!! */
     if (c->ssl && c->ssl->handshaked) {
         switch (lua_type(L, 2)) {
         case LUA_TUSERDATA:
@@ -1250,6 +1248,8 @@ ngx_http_lua_socket_tcp_sslhandshake(lua_State *L)
         return 1;
     }
 
+    /* 创建SSL对象，并且关联到c->ssl, 
+       结构定义于${nginx-src-path}/src/event/ngx_event_openssl.h */
     if (ngx_ssl_create_connection(u->conf->ssl, c,
                                   NGX_SSL_BUFFER|NGX_SSL_CLIENT)
         != NGX_OK)
@@ -1268,13 +1268,13 @@ ngx_http_lua_socket_tcp_sslhandshake(lua_State *L)
 
     c->sendfile = 0;
 
+    /* 处理传入参数 */
     if (n >= 2) {
-        if (lua_type(L, 2) == LUA_TBOOLEAN) {
+        /* arg1: reused_session，支持会话恢复 */
+        if (lua_type(L, 2) == LUA_TBOOLEAN) {  /* 布尔值 */
             u->ssl_session_reuse = lua_toboolean(L, 2);
-
-        } else {
+        } else {                               /* 直接传入待使用的会话 */
             psession = lua_touserdata(L, 2);
-
             if (psession != NULL && *psession != NULL) {
                 if (ngx_ssl_set_session(c, *psession) != NGX_OK) {
                     lua_pushnil(L);
@@ -1287,17 +1287,15 @@ ngx_http_lua_socket_tcp_sslhandshake(lua_State *L)
                                *psession, (*psession)->references);
             }
         }
-
+        /* arg2: server_name，指定服务器名 */
         if (n >= 3) {
             name.data = (u_char *) lua_tolstring(L, 3, &name.len);
-
             if (name.data) {
                 ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                                "lua ssl server name: \"%*s\"", name.len,
                                name.data);
 
 #ifdef SSL_CTRL_SET_TLSEXT_HOSTNAME
-
                 if (SSL_set_tlsext_host_name(c->ssl->connection, name.data)
                     == 0)
                 {
@@ -1305,7 +1303,6 @@ ngx_http_lua_socket_tcp_sslhandshake(lua_State *L)
                     lua_pushliteral(L, "SSL_set_tlsext_host_name failed");
                     return 2;
                 }
-
 #else
 
                ngx_log_debug0(NGX_LOG_DEBUG_HTTP, c->log, 0,
@@ -1314,10 +1311,11 @@ ngx_http_lua_socket_tcp_sslhandshake(lua_State *L)
 
 #endif
             }
-
+            /* arg3: ssl_verify，是否验证证书 */
             if (n >= 4) {
                 u->ssl_verify = lua_toboolean(L, 4);
-
+                
+                /* arg4: send_status_req, 是否发送OSCP状态 */
                 if (n >= 5) {
                     if (lua_toboolean(L, 5)) {
 #ifdef NGX_HTTP_LUA_USE_OCSP
@@ -1334,9 +1332,9 @@ ngx_http_lua_socket_tcp_sslhandshake(lua_State *L)
 
     dd("found sni name: %.*s %p", (int) name.len, name.data, name.data);
 
+    /* 记录连接的服务器名 */
     if (name.len == 0) {
         u->ssl_name.len = 0;
-
     } else {
         if (u->ssl_name.data) {
             /* buffer already allocated */
@@ -1369,6 +1367,7 @@ new_ssl_name:
         }
     }
 
+    /* 做为写协程 */
     u->write_co_ctx = coctx;
 
 #if 0
@@ -1377,24 +1376,24 @@ new_ssl_name:
 #endif
 #endif
 
+    /* 启动握手 */
     rc = ngx_ssl_handshake(c);
 
     dd("ngx_ssl_handshake returned %d", (int) rc);
-
-    if (rc == NGX_AGAIN) {
+    if (rc == NGX_AGAIN) {    /* 握手协商ing */
         if (c->write->timer_set) {
             ngx_del_timer(c->write);
         }
 
-        ngx_add_timer(c->read, u->connect_timeout);
+        ngx_add_timer(c->read, u->connect_timeout);  /* 超时定时器 */
 
-        u->conn_waiting = 1;
+        u->conn_waiting = 1;                         /* 设定标识 */
         u->write_prepare_retvals = ngx_http_lua_ssl_handshake_retval_handler;
 
         ngx_http_lua_cleanup_pending_operation(coctx);
         coctx->cleanup = ngx_http_lua_coctx_cleanup;
         coctx->data = u;
-
+                                                     /* 设定握手结束后的处理句柄，握手流程由nginx处理 */
         c->ssl->handler = ngx_http_lua_ssl_handshake_handler;
 
         if (ctx->entered_content_phase) {
@@ -1404,15 +1403,16 @@ new_ssl_name:
             r->write_event_handler = ngx_http_core_run_phases;
         }
 
-        return lua_yield(L, 0);
+        return lua_yield(L, 0);                      /* 主动让出CPU */
     }
 
+    /* 握手成功，通知Lua接口 */
     top = lua_gettop(L);
     ngx_http_lua_ssl_handshake_handler(c);
     return lua_gettop(L) - top;
 }
 
-
+/* tcpsock:sslhandshake()握手成功后的处理句柄 */
 static void
 ngx_http_lua_ssl_handshake_handler(ngx_connection_t *c)
 {
@@ -1453,11 +1453,11 @@ ngx_http_lua_ssl_handshake_handler(ngx_connection_t *c)
         ngx_del_timer(c->read);
     }
 
+    /* 握手完成 */
     if (c->ssl->handshaked) {
-
+        /* 验证服务器端证书 */
         if (u->ssl_verify) {
             rc = SSL_get_verify_result(c->ssl->connection);
-
             if (rc != X509_V_OK) {
                 lua_pushnil(L);
                 err = lua_pushfstring(L, "%d: %s", (int) rc,
@@ -1493,20 +1493,21 @@ ngx_http_lua_ssl_handshake_handler(ngx_connection_t *c)
 #endif
         }
 
-        if (waiting) {
+        if (waiting) { /* 异步等待，设置恢复句柄 */
             ngx_http_lua_socket_handle_conn_success(r, u);
 
-        } else {
+        } else {       /* 非异步等待，告知Lua接口 */
             (void) ngx_http_lua_ssl_handshake_retval_handler(r, u, L);
         }
 
-        if (waiting) {
+        if (waiting) { /* 处理其他子请求 */
             ngx_http_run_posted_requests(dc);
         }
 
         return;
     }
 
+    /* 握手失败 */
     lua_pushnil(L);
     lua_pushliteral(L, "handshake failed");
 
@@ -1541,6 +1542,7 @@ ngx_http_lua_ssl_handshake_retval_handler(ngx_http_request_t *r,
 
     c = u->peer.connection;
 
+    /* 会话返回Lua接口 */
     ssl_session = ngx_ssl_get_session(c);
     if (ssl_session == NULL) {
         *ud = NULL;
