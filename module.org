@@ -97,8 +97,8 @@ _main_conf_t->phases[]；因此这些回调函数可以和nginx的同类型配�
 #+BEGIN_EXAMPLE
 除NGX_HTTP_CONTENT_PHASE外，其他部分的初始化点及对应的函数
 -ngx_http_lua_init()                    ~/src/ngx_http_lua_module.c
-  -->ngx_http_lua_rewrite_by_lua()      NGX_HTTP_REWRITE_PHASE
-  -->ngx_http_lua_access_by_lua()       NGX_HTTP_ACCESS_PHASE
+  -->ngx_http_lua_rewrite_handler()     NGX_HTTP_REWRITE_PHASE
+  -->ngx_http_lua_access_handler()      NGX_HTTP_ACCESS_PHASE
   -->ngx_http_lua_log_handler()         NGX_HTTP_LOG_PHASE
   -->ngx_http_lua_content_handler()     NGX_HTTP_CONTENT_PHASE/ngx_http_core_loc_conf_t->handler
   -->ngx_http_lua_header_filter()       加入ngx_http_top_header_filter链表/header_filter_by_lua*
@@ -335,7 +335,7 @@ openresty实现了非阻塞的原生态插口结构ngx.socket，兼容LuaSocket�
         -ngx_http_lua_inject_ngx_api()  注册非阻塞插口，cosocket
           -ngx_http_lua_inject_socket_tcp_api()
             -->ngx.socket.tcp/stream()处理函数ngx_http_lua_socket_tcp()
-            -->新建元表，注册表索引ngx_http_lua_tcp_socket_metatable_key
+            -->新建元表，注册表索引 ngx_http_lua_tcp_socket_metatable_key
               -ngx_http_lua_socket_tcp_connect()         "connect"
               -ngx_http_lua_socket_tcp_sslhandshake()    "sslhandshake"
               -ngx_http_lua_socket_tcp_receive()         "receive"
@@ -356,7 +356,7 @@ openresty实现了非阻塞的原生态插口结构ngx.socket，兼容LuaSocket�
 
 -ngx_http_lua_socket_tcp()             ~/src/ngx_http_lua_socket_tcp.c
   -lua_createtable()                   创建对象
-  -lua_setmetatable()                  指定元表为注册表索引ngx_http_lua_tcp_socket_metatable_key
+  -lua_setmetatable()                  指定元表为注册表索引 ngx_http_lua_tcp_socket_metatable_key
 #+END_EXAMPLE
 
 #+BEGIN_EXAMPLE
@@ -405,6 +405,50 @@ openresty在构建Lua虚拟机阶段重新设计了coroutine的执行函数，�
             -coroutine.resume()     ngx_http_lua_coroutine_resume()
             -coroutine.yield()      ngx_http_lua_coroutine_yield()
             -coroutine.status()     ngx_http_lua_coroutine_status()
+#+END_EXAMPLE
+
+* 协程
+openresty通过对应每个请求建立单独的协程，然后根据数据流在不同的协程间切换
+运行；另外，在此请求协程中，还可以通过cosocket等机制实现阻塞非等待操作，
+大大简化了此异步流程。
+
+#+BEGIN_EXAMPLE
+-ngx_http_wait_request_handler()           请求处理入口
+  -ngx_http_process_request_headers()
+    -ngx_http_core_run_phases()
+      -ngx_http_core_find_config_phase()   NGX_HTTP_FIND_CONFIG_PHASE阶段->checker
+        -查找location配置
+        -ngx_http_update_location_config()     赋值ngx_http_request_t->content_handler
+      -ngx_http_lua_rewrite_handler()      NGX_HTTP_REWRITE_PHASE阶段, ~/src/ngx_http_lua_rewriteby.c
+        -ngx_http_lua_create_ctx()             创建Lua上下文
+        -ngx_http_lua_rewrite_handler_file()
+          -ngx_http_lua_rebase_path()          获取Lua脚本绝对路径
+          -ngx_http_lua_get_lua_vm()           获取虚拟机
+          -ngx_http_lua_cache_loadfile()       加载Lua脚本，编译
+          -ngx_http_lua_rewrite_by_chunk()     执行
+            -ngx_http_lua_new_thread()           新建协程
+              -lua_newthread()
+            -ngx_http_lua_set_req()              关联请求
+            -ngx_http_lua_run_thread()           启动协程
+            -ngx_http_lua_run_posted_threads()   执行此协程内建的悬挂协程
+      -ngx_http_lua_access_handler()       NGX_HTTP_ACCESS_PHASE阶段, ~/src/ngx_http_lua_accessby.c
+      -ngx_http_core_content_phase()       NGX_HTTP_CONTENT_PHASE阶段->checker, ${nginx-src-path}/src/http/ngx_http_core_module.c
+        -ngx_http_request_t->content_handler()
+        -->ngx_http_core_loc_conf_t->handler()
+        -->ngx_http_lua_content_handler()      Lua内容阶段处理入口，~/src/ngx_http_lua_contentby.c
+        -ngx_http_finalize_request()
+      -ngx_http_lua_log_handler()          NGX_HTTP_LOG_PHASE阶段
+#+END_EXAMPLE
+
+#+BEGIN_EXAMPLE
+-ngx_http_lua_run_thread()                 协程执行入口，~/src/ngx_http_lua_util.c
+  -lua_atpanic()                               设置崩溃处理句柄
+  -for(;;)                                     主循环
+    -lua_resume()                                  恢复虚拟机运行
+    -switch()
+      -LUA_YIELD:                                  主动让出CPU
+      -0:                                          Lua脚本执行完毕
+      -default:                                    其他
 #+END_EXAMPLE
 
 * 参考

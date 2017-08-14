@@ -414,7 +414,7 @@ typedef struct {
     ngx_int_t        count;         /* 引用计数 */
 } ngx_http_lua_vm_state_t;
 
-/* Lua的执行环境，是沟通起nginx的C环境和Lua环境的桥梁 */
+/* 每请求的Lua上下文执行环境，是沟通起nginx的C环境和Lua环境的桥梁 */
 typedef struct ngx_http_lua_ctx_s {
     ngx_http_lua_vm_state_t *vm_state; /* 对应配置指令lua_coce_cache off
                                           每个请求对应一个新的虚拟机，以
@@ -437,7 +437,7 @@ typedef struct ngx_http_lua_ctx_s {
     ngx_list_t *user_co_ctx;           /* coroutine contexts for user
                                                  coroutines */
 
-    ngx_http_lua_co_ctx_t entry_co_ctx;/* 入口协程执行环境，coroutine context 
+    ngx_http_lua_co_ctx_t entry_co_ctx;/* 主(入口)协程执行环境，coroutine context 
                                           for the entry coroutine */
 
     ngx_http_lua_co_ctx_t   *on_abort_co_ctx; /* coroutine context for the

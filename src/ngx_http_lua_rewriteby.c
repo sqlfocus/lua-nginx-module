@@ -20,7 +20,7 @@
 static ngx_int_t ngx_http_lua_rewrite_by_chunk(lua_State *L,
     ngx_http_request_t *r);
 
-
+/* 配置指令“rewrite_by_lua_file”的执行入口 */
 ngx_int_t
 ngx_http_lua_rewrite_handler(ngx_http_request_t *r)
 {
@@ -77,13 +77,14 @@ ngx_http_lua_rewrite_handler(ngx_http_request_t *r)
         }
     }
 
+    /* =ngx_http_lua_rewrite_handler_file() */
     llcf = ngx_http_get_module_loc_conf(r, ngx_http_lua_module);
     if (llcf->rewrite_handler == NULL) {
         dd("no rewrite handler found");
         return NGX_DECLINED;
     }
 
-    /* 创建协程环境 */
+    /* 创建Lua上下文环境 */
     ctx = ngx_http_get_module_ctx(r, ngx_http_lua_module);
     dd("ctx = %p", ctx);
     if (ctx == NULL) {
@@ -93,8 +94,9 @@ ngx_http_lua_rewrite_handler(ngx_http_request_t *r)
         }
     }
 
+    /* 方式1: 先前已经运行了Lua一段时间，由于条件限制等原因主动yield，此刻可
+              通过resume恢复Lua先前的运行环境 */
     dd("entered? %d", (int) ctx->entered_rewrite_phase);
-
     if (ctx->entered_rewrite_phase) {
         dd("rewriteby: calling wev handler");
         rc = ctx->resume_handler(r);
@@ -129,10 +131,12 @@ ngx_http_lua_rewrite_handler(ngx_http_request_t *r)
         return rc;
     }
 
+    /* 等待报文体读取完毕 */
     if (ctx->waiting_more_body) {
         return NGX_DONE;
     }
 
+    /* 强制读取报文体，读取完毕后才能进入rewrite阶段处理 */
     if (llcf->force_read_body && !ctx->read_body_done) {
         r->request_body_in_single_buf = 1;
         r->request_body_in_persistent_file = 1;
@@ -204,13 +208,14 @@ ngx_http_lua_rewrite_handler_file(ngx_http_request_t *r)
         return NGX_ERROR;
     }
 
+    /* 获取绝对路径 */
     script_path = ngx_http_lua_rebase_path(r->pool, eval_src.data,
                                            eval_src.len);
-
     if (script_path == NULL) {
         return NGX_ERROR;
     }
-
+    
+    /* 获取Lua虚拟机 */
     L = ngx_http_lua_get_lua_vm(r, NULL);
 
     /*  load Lua script file (w/ cache)        sp = 1 */
@@ -242,7 +247,7 @@ ngx_http_lua_rewrite_by_chunk(lua_State *L, ngx_http_request_t *r)
 
     ngx_http_lua_loc_conf_t     *llcf;
 
-    /*  {{{ new coroutine to handle request */
+    /* 新建协程，处理当前请求，{{{ new coroutine to handle request */
     co = ngx_http_lua_new_thread(r, L, &co_ref);
 
     if (co == NULL) {
@@ -252,29 +257,31 @@ ngx_http_lua_rewrite_by_chunk(lua_State *L, ngx_http_request_t *r)
         return NGX_HTTP_INTERNAL_SERVER_ERROR;
     }
 
-    /*  move code closure to new coroutine */
+    /* 将编译后的Lua脚本代码块儿移动到新协程，
+       move code closure to new coroutine */
     lua_xmove(L, co, 1);
 
-    /*  set closure's env table to new coroutine's globals table */
+    /* 设定代码块儿的执行环境为新协程的全局表，_G
+       set closure's env table to new coroutine's globals table */
     ngx_http_lua_get_globals_table(co);
     lua_setfenv(co, -2);
 
-    /*  save nginx request in coroutine globals table */
+    /* 记录请求指针到新协程全局表_G["__ngx_req"]
+        save nginx request in coroutine globals table */
     ngx_http_lua_set_req(co, r);
 
-    /*  {{{ initialize request context */
+    /* 初始化当前请求的Lua上下文， {{{ initialize request context */
     ctx = ngx_http_get_module_ctx(r, ngx_http_lua_module);
-
     dd("ctx = %p", ctx);
-
     if (ctx == NULL) {
         return NGX_ERROR;
     }
-
     ngx_http_lua_reset_ctx(r, L, ctx);
 
+    /* 设置标识，进入rewrite阶段 */
     ctx->entered_rewrite_phase = 1;
 
+    /* 记录新协程信息 */
     ctx->cur_co_ctx = &ctx->entry_co_ctx;
     ctx->cur_co_ctx->co = co;
     ctx->cur_co_ctx->co_ref = co_ref;
@@ -284,7 +291,7 @@ ngx_http_lua_rewrite_by_chunk(lua_State *L, ngx_http_request_t *r)
 
     /*  }}} */
 
-    /*  {{{ register request cleanup hooks */
+    /* 设置清理句柄，{{{ register request cleanup hooks */
     if (ctx->cleanup == NULL) {
         cln = ngx_http_cleanup_add(r, 0);
         if (cln == NULL) {
@@ -297,10 +304,10 @@ ngx_http_lua_rewrite_by_chunk(lua_State *L, ngx_http_request_t *r)
     }
     /*  }}} */
 
+    /* 设置当前处理阶段 */
     ctx->context = NGX_HTTP_LUA_CONTEXT_REWRITE;
 
     llcf = ngx_http_get_module_loc_conf(r, ngx_http_lua_module);
-
     if (llcf->check_client_abort) {
         r->read_event_handler = ngx_http_lua_rd_check_broken_connection;
 
@@ -324,22 +331,25 @@ ngx_http_lua_rewrite_by_chunk(lua_State *L, ngx_http_request_t *r)
         r->read_event_handler = ngx_http_block_reading;
     }
 
+    /* 运行新建协程 */
     rc = ngx_http_lua_run_thread(L, r, ctx, 0);
 
+    /*** 处理完毕，返回 ***/
     if (rc == NGX_ERROR || rc > NGX_OK) {
         return rc;
     }
 
+    /*** 脚本未完成，主动让出CPU ***/
     c = r->connection;
 
-    if (rc == NGX_AGAIN) {
+    if (rc == NGX_AGAIN) {         /* 执行此协程的内建协程 */
         rc = ngx_http_lua_run_posted_threads(c, L, r, ctx);
-
-    } else if (rc == NGX_DONE) {
+    } else if (rc == NGX_DONE) {   /* */
         ngx_http_lua_finalize_request(r, NGX_DONE);
         rc = ngx_http_lua_run_posted_threads(c, L, r, ctx);
     }
 
+    /*** 其他 ***/
     if (rc == NGX_OK || rc == NGX_DECLINED) {
         if (r->header_sent) {
             dd("header already sent");

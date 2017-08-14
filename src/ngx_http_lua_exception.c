@@ -49,6 +49,7 @@ ngx_http_lua_atpanic(lua_State *L)
         len = sizeof("unknown reason") - 1;
     }
 
+    /* 触发worker进程优雅退出 */
     ngx_log_stderr(0, "lua atpanic: Lua VM crashed, reason: %*s", len, s);
     ngx_quit = 1;
 

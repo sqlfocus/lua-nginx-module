@@ -1043,7 +1043,8 @@ ngx_http_lua_socket_resolve_retval_handler(ngx_http_request_t *r,
         return ngx_http_lua_socket_conn_error_retval_handler(r, u, L);
     }
 
-    /* rc == NGX_OK || rc == NGX_AGAIN */
+    /* 链接ing，设置处理句柄，准备放弃cpu
+       rc == NGX_OK || rc == NGX_AGAIN */
     c = pc->connection;
 
     c->data = u;                  /* 设置报文处理句柄 */
@@ -2952,8 +2953,9 @@ ngx_http_lua_socket_handle_conn_success(ngx_http_request_t *r,
 
         ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                        "lua tcp socket waking up the current request (conn)");
-
-        r->write_event_handler(r);
+                                  /* 触发函数 ngx_http_core_run_phases() */
+        r->write_event_handler(r);/* 或 ngx_http_lua_content_wev_handler(), 以
+                                     便继续执行nginx后续流程 */
     }
 }
 

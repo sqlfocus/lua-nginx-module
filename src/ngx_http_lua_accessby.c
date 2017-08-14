@@ -21,7 +21,7 @@
 static ngx_int_t ngx_http_lua_access_by_chunk(lua_State *L,
     ngx_http_request_t *r);
 
-
+/* 配置指令“access_by_lua_file”的执行入口 */
 ngx_int_t
 ngx_http_lua_access_handler(ngx_http_request_t *r)
 {
